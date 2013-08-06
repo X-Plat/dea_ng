@@ -158,7 +158,7 @@ module Dea
         "dest_dir" => workspace.warden_staged_dir,
         "cache_dir" => workspace.warden_cache,
         "environment" => attributes["properties"],
-        "staging_info_path" => workspace.warden_staging_info
+        "staging_info_name" => Dea::StagingTaskWorkspace::STAGING_INFO
       }
 
       platform_config = staging_config["platform_config"].merge("cache" => workspace.warden_cache)
@@ -472,6 +472,7 @@ module Dea
         PLATFORM_CONFIG=#{workspace.platform_config_path}
         BUILDPACK_CACHE=#{staging_config["environment"]["BUILDPACK_CACHE"]}
         STAGING_TIMEOUT=#{staging_timeout}
+        MEMORY_LIMIT=#{(config.minimum_staging_memory_mb).to_i}m
       ]
       env.map! do |var|
         key, value = var.split("=", 2)

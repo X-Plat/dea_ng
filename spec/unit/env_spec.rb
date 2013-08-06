@@ -1,283 +1,394 @@
 # coding: UTF-8
 
 require "spec_helper"
-
 require "vcap/common"
-
 require "dea/env"
 
 describe Dea::Env do
   let(:service) do
     {
-      "name"        => "name",
-      "type"        => "type",
-      "label"       => "label",
-      "vendor"      => "vendor",
-      "version"     => "version",
-      "tags"        => { "key" => "value" },
-      "plan"        => "plan",
+      "credentials" => {"uri" => "postgres://user:pass@host:5432/db"},
+      "options" => {},
+      "label" => "elephantsql-n/a",
+      "provider" => "elephantsql",
+      "version" => "n/a",
+      "vendor" => "elephantsql",
+      "plan" => "panda",
       "plan_option" => "plan_option",
-      "credentials" => {
-        "user" => "password",
-        "host" => "host",
-        "port" => "port",
-      },
-      "invalid"     => "invalid",
+      "name" => "elephantsql-vip-uat",
+      "tags" => {"key" => "value"}
     }
   end
+  let(:services) { [service] }
 
-  let(:instance_attributes) do
-    {
-      "instance_id"         => VCAP.secure_uuid,
-      "instance_index"      => 37,
-
-      "application_id"      => 37,
-      "application_version" => "some_version",
-      "application_name"    => "my_application",
-      "application_uris"    => ["foo.com", "bar.com"],
-
-      "droplet_sha1"        => "deadbeef",
-      "droplet_uri"         => "http://foo.com/file.ext",
-
-      "limits"              => { "mem" => 1, "disk" => 2, "fds" => 3 },
-      "environment"         => { "FOO" => "BAR" },
-      "services"            => { "name" => "redis", "type" => "redis" },
-      "flapping"            => false,
-    }
-  end
+  let(:environment) { ["A=one_value", "B=with spaces", "C=with'quotes\"double", "D=referencing $A", "E=with=equals", "F="] }
+  let(:debug) { nil }
 
   let(:instance) do
-    mock("Dea::Instance")
-  end
-
-  subject(:env) do
-    Dea::Env.new(instance)
-  end
-
-  describe "#services_for_json" do
-    let(:services) do
-      [service]
-    end
-
-    let(:services_for_json) do
-      env.services_for_json
-    end
-
-    before do
-      instance.stub(:services).and_return(services)
-    end
-
-    keys = %W(
-      name
-      label
-      tags
-      plan
-      plan_option
-      credentials
+    mock(:instance,
+         instance_id: VCAP.secure_uuid,
+         instance_index: 37,
+         state_starting_timestamp: Time.now.to_f,
+         instance_container_port: 4567,
+         instance_console_container_port: 1234,
+         instance_debug_container_port: 2345
     )
+  end
 
-    keys.each do |key|
-      it "includes #{key.inspect}" do
-        services_for_json[service["label"]].first.should include(key)
-      end
-    end
+  let(:starting_message) do
+    {
+      "droplet" => "fake-droplet-sha",
+      "tags" => {
+        "space" => "fake-space-sha"
+      },
+      "name" => "vip-uat-sidekiq",
+      "uris" => ["first_uri", "second_uri"],
+      "prod" => false,
+      "sha1" => nil,
+      "executableFile" => "deprecated",
+      "executableUri" => nil,
+      "version" => "fake-version-no",
+      "services" => services,
+      "limits" => {
+        "mem" => 512,
+        "disk" => 1024,
+        "fds" => 16384},
+      "cc_partition" => "default",
+      "env" => environment,
+      "console" => true,
+      "debug" => debug,
+      "index" => 0
+    }
+  end
 
-    it "doesn't include unknown keys" do
-      services_for_json[service["label"]].should have(1).service
-      services_for_json[service["label"]].first.keys.should_not include("invalid")
-    end
-
-    describe "grouping" do
-      let(:services) do
-        [
-          service.merge("label" => "l1"),
-          service.merge("label" => "l1"),
-          service.merge("label" => "l2"),
-        ]
-      end
-
-      it "should group services by label" do
-        services_for_json.should have(2).groups
-        services_for_json["l1"].should have(2).services
-        services_for_json["l2"].should have(1).service
-      end
-    end
-
-    describe "ignoring" do
-      let(:services) do
-        [service.merge("name" => nil)]
-      end
-
-      it "should ignore keys with nil values" do
-        services_for_json[service["label"]].should have(1).service
-        services_for_json[service["label"]].first.keys.should_not include("name")
-      end
+  def self.it_exports(name, value)
+    it "exports $#{name} as #{value}" do
+      expect(`env | grep #{name}`).to be
+      expect(`#{exported_variables} echo $#{name}`.chomp).to match value
     end
   end
 
-  describe "#application_for_json" do
-    let(:application_for_json) do
-      env.application_for_json
-    end
+  context "when running from the instance task" do
+    subject(:env) { Dea::Env.new(starting_message, instance) }
 
-    before do
-      instance_attributes.each do |key, value|
-        instance.stub(key).and_return(value)
+    describe "#vcap_services" do
+      let(:vcap_services) { env.send(:vcap_services) }
+
+      keys = %W(
+        name
+        label
+        tags
+        plan
+        plan_option
+        credentials
+      )
+
+      keys.each do |key|
+        it "includes #{key.inspect}" do
+          vcap_services[service["label"]].first.should include(key)
+        end
       end
 
-      instance.stub(:state_starting_timestamp).and_return(Time.now.to_f)
-
-      instance.stub(:instance_container_port).and_return(4567)
-    end
-
-    it "returns a Hash" do
-      application_for_json.should be_a(Hash)
-    end
-
-    keys = %W(
-      instance_id
-      instance_index
-
-      application_version
-      application_name
-      application_uris
-      application_users
-    )
-
-    keys.each do |key|
-      it "includes #{key.inspect}" do
-        application_for_json.should include(key)
+      it "doesn't include unknown keys" do
+        vcap_services[service["label"]].should have(1).service
+        vcap_services[service["label"]].first.keys.should_not include("invalid")
       end
-    end
 
-    it "includes the time the instance was started" do
-      application_for_json["started_at"].should be_a(Time)
-      application_for_json["started_at_timestamp"].should be_a(Integer)
-    end
+      describe "grouping" do
+        let(:services) do
+          [
+            service.merge("label" => "l1"),
+            service.merge("label" => "l1"),
+            service.merge("label" => "l2"),
+          ]
+        end
 
-    it "includes the host and port the instance should listen on" do
-      application_for_json["host"].should be
-      application_for_json["port"].should == 4567
-    end
+        it "should group services by label" do
+          vcap_services.should have(2).groups
+          vcap_services["l1"].should have(2).services
+          vcap_services["l2"].should have(1).service
+        end
+      end
 
-    it "includes the resource limits" do
-      application_for_json["limits"].should be_a(Hash)
-    end
+      describe "ignoring" do
+        let(:services) do
+          [service.merge("name" => nil)]
+        end
 
-    describe "translation" do
-      translations = {
-        "application_version"  => "version",
-        "application_name"     => "name",
-        "application_uris"     => "uris",
-        "application_users"    => "users",
-
-        "started_at"           => "start",
-        "started_at_timestamp" => "state_timestamp",
-      }
-
-      translations.each do |from, to|
-        it "should translate #{from.inspect} to #{to.inspect}" do
-          application_for_json[to].should == application_for_json[from]
+        it "should ignore keys with nil values" do
+          vcap_services[service["label"]].should have(1).service
+          vcap_services[service["label"]].first.keys.should_not include("name")
         end
       end
     end
+
+    describe "#vcap_application" do
+      let(:vcap_application) { env.send(:vcap_application) }
+
+      it "returns a Hash" do
+        vcap_application.should be_a(Hash)
+      end
+
+      keys = %W(
+        instance_id
+        instance_index
+
+        application_version
+        application_name
+        application_uris
+        application_users
+      )
+
+      keys.each do |key|
+        it "includes #{key.inspect}" do
+          vcap_application.should include(key)
+        end
+      end
+
+      it "includes the time the instance was started" do
+        vcap_application["started_at"].should be_a(Time)
+        vcap_application["started_at_timestamp"].should be_a(Integer)
+      end
+
+      it "includes the host and port the instance should listen on" do
+        vcap_application["host"].should be
+        vcap_application["port"].should == 4567
+      end
+
+      it "includes the resource limits" do
+        vcap_application["limits"].should be_a(Hash)
+      end
+
+      describe "translation" do
+        translations = {
+          "application_version"  => "version",
+          "application_name"     => "name",
+          "application_uris"     => "uris",
+          "application_users"    => "users",
+
+          "started_at"           => "start",
+          "started_at_timestamp" => "state_timestamp",
+        }
+
+        translations.each do |from, to|
+          it "should translate #{from.inspect} to #{to.inspect}" do
+            vcap_application[to].should == vcap_application[from]
+          end
+        end
+      end
+    end
+
+    describe "#exported_system_environment_variables" do
+      let(:exported_variables) { subject.exported_system_environment_variables }
+
+      it_exports "VCAP_APPLICATION", %r{\"instance_index\":37}
+      it_exports "VCAP_SERVICES", %r{\"plan\":\"panda\"}
+      it_exports "VCAP_APP_HOST", "0.0.0.0"
+      it_exports "VCAP_APP_PORT", "4567"
+      it_exports "VCAP_DEBUG_IP", ""
+      it_exports "VCAP_DEBUG_PORT", ""
+      it_exports "VCAP_CONSOLE_IP", "0.0.0.0"
+      it_exports "VCAP_CONSOLE_PORT", "1234"
+      it_exports "PORT", "4567"
+      it_exports "HOME", "#{Dir.pwd}/app"
+      it_exports "MEMORY_LIMIT", "512m"
+      it_exports "TMPDIR", "#{Dir.pwd}/tmp"
+
+      context "when it has a DB" do
+        it_exports "DATABASE_URL", "postgresql://user:pass@host:5432/db"
+      end
+
+      context "when it does NOT have a DB" do
+        let(:services) { [] }
+
+        it_exports "DATABASE_URL", ""
+      end
+
+      context "when debug is set" do
+        let(:debug) { 'mode' }
+
+        it_exports "VCAP_DEBUG_MODE", "mode"
+        it_exports "VCAP_DEBUG_IP", "0.0.0.0"
+        it_exports "VCAP_DEBUG_PORT", "2345"
+      end
+
+      context "when debug mode is NOT set" do
+        before { instance.stub(:debug).and_return(nil) }
+
+        it_exports "VCAP_DEBUG_MODE", ""
+      end
+    end
+
+    describe "#exported_user_environment_variables" do
+      let(:exported_variables) { subject.exported_user_environment_variables }
+
+      it_exports "A", "one_value"
+      it_exports "B", "with spaces"
+      it_exports "C", %Q[with'quotes"double]
+      it_exports "D", "referencing one_value"
+      it_exports "E", "with=equals"
+      it_exports "F", ""
+    end
   end
 
-  describe "#env" do
-    let(:application_for_json) do
+  context "when running from the staging task" do
+    let(:staging_message) do
       {
-        "host"        => "localhost",
-        "name"        => "name",
-        "instance_id" => "instance_id",
-        "version"     => "version",
-      }
-    end
-
-    let(:services_for_json) do
-      {
-        "label" => {
-          "name" => "service",
+        "app_id" => "fake-app-id",
+        "task_id" => "fake-task-id",
+        "properties" => {
+          "services" => services,
+          "buildpack" => nil,
+          "resources" => {
+            "memory" => 512,
+            "disk" => 1024,
+            "fds" => 16384
+          },
+          "environment" => environment,
+          "meta" => {
+            "console" => true,
+            "command" => "some_command"
+          }
         },
+        "download_uri" => "https://download_uri",
+        "upload_uri" => "http://upload_uri",
+        "buildpack_cache_download_uri" => "https://buildpack_cache_download_uri",
+        "buildpack_cache_upload_uri" => "http://buildpack_cache_upload_uri",
+        "start_message" => starting_message
       }
     end
 
-    let(:legacy_services_for_json) do
-      {
-        "tier" => "free"
-      }
-    end
+    subject(:env) { Dea::Env.new(staging_message) }
 
-    before do
-      subject.stub(:application_for_json).and_return(application_for_json)
-      subject.stub(:services_for_json).and_return(services_for_json)
-      subject.stub(:legacy_services_for_json).and_return(legacy_services_for_json)
+    describe "#vcap_services" do
+      let(:vcap_services) { env.send(:vcap_services) }
 
-      instance.stub(:instance_container_port).and_return(4567)
-      instance.stub(:instance_debug_container_port).and_return(4568)
-      instance.stub(:instance_console_container_port).and_return(4569)
-      instance.stub(:services).and_return([service])
+      keys = %W(
+        name
+        label
+        tags
+        plan
+        plan_option
+        credentials
+      )
 
-      instance.stub(:debug).and_return(nil)
+      keys.each do |key|
+        it "includes #{key.inspect}" do
+          vcap_services[service["label"]].first.should include(key)
+        end
+      end
 
-      instance.stub(:environment).and_return({ "ENVIRONMENT" => "yep" })
-      instance.stub(:bootstrap).and_return do
-        mock("bootstrap", :config => {})
+      it "doesn't include unknown keys" do
+        vcap_services[service["label"]].should have(1).service
+        vcap_services[service["label"]].first.keys.should_not include("invalid")
+      end
+
+      describe "grouping" do
+        let(:services) do
+          [
+            service.merge("label" => "l1"),
+            service.merge("label" => "l1"),
+            service.merge("label" => "l2"),
+          ]
+        end
+
+        it "should group services by label" do
+          vcap_services.should have(2).groups
+          vcap_services["l1"].should have(2).services
+          vcap_services["l2"].should have(1).service
+        end
+      end
+
+      describe "ignoring" do
+        let(:services) do
+          [service.merge("name" => nil)]
+        end
+
+        it "should ignore keys with nil values" do
+          vcap_services[service["label"]].should have(1).service
+          vcap_services[service["label"]].first.keys.should_not include("name")
+        end
       end
     end
 
-    def find(key)
-      pair = subject.env.find { |e| e[0] == key }
-      pair[1] if pair
-    end
+    describe "#vcap_application" do
+      let(:vcap_application) { env.send(:vcap_application) }
 
-    it "includes VCAP_APPLICATION" do
-      find("VCAP_APPLICATION").should include(Yajl::Encoder.encode(application_for_json))
-    end
+      it "returns a Hash" do
+        vcap_application.should be_a(Hash)
+      end
 
-    it "includes VCAP_SERVICES" do
-      find("VCAP_SERVICES").should include(Yajl::Encoder.encode(services_for_json))
-    end
+      keys = %W(
+        application_version
+        application_name
+        application_uris
+        application_users
+      )
 
-    it "includes VCAP_APP_*" do
-      find("VCAP_APP_HOST").should =~ /#{application_for_json["host"]}/
-      find("VCAP_APP_PORT").should =~ /4567/
-    end
+      keys.each do |key|
+        it "includes #{key.inspect}" do
+          vcap_application.should include(key)
+        end
+      end
 
-    it "does not includes VCAP_DEBUG_*" do
-      find("VCAP_DEBUG_IP").should be_nil
-      find("VCAP_DEBUG_PORT").should be_nil
-    end
+      it "includes the resource limits" do
+        vcap_application["limits"].should be_a(Hash)
+      end
 
-    it "includes VCAP_CONSOLE_*" do
-      find("VCAP_CONSOLE_IP").should =~ /#{application_for_json["host"]}/
-      find("VCAP_CONSOLE_PORT").should =~ /4569/
-    end
+      describe "translation" do
+        translations = {
+          "application_version"  => "version",
+          "application_name"     => "name",
+          "application_uris"     => "uris",
+          "application_users"    => "users",
+        }
 
-    it "includes the debug mode when the debug mode is set" do
-      instance.stub(:debug).and_return("mode")
-      find("VCAP_DEBUG_MODE").should == "'mode'"
-    end
-
-    it "doesn't include the debug mode when debug mode is not set" do
-      instance.stub(:debug).and_return(nil)
-      find("VCAP_DEBUG_MODE").should_not be
-    end
-
-    it "includes the user-specified environment" do
-      find("ENVIRONMENT").should be
-    end
-
-    it "wraps user-specified environment in double quotes if it isn't already" do
-      find("ENVIRONMENT").should == %{"yep"}
-    end
-
-    context "when in debug mode" do
-      before { instance.stub(:debug).and_return(true) }
-
-      it "does not includes VCAP_DEBUG_*" do
-        find("VCAP_DEBUG_IP").should =~ /#{application_for_json["host"]}/
-        find("VCAP_DEBUG_PORT").should =~ /4568/
+        translations.each do |from, to|
+          it "should translate #{from.inspect} to #{to.inspect}" do
+            vcap_application[to].should == vcap_application[from]
+          end
+        end
       end
     end
+
+    describe "#exported_system_environment_variables" do
+      let(:exported_variables) { subject.exported_system_environment_variables }
+
+      it_exports "VCAP_APPLICATION", %r{\"mem\":512}
+      it_exports "VCAP_SERVICES", %r{\"plan\":\"panda\"}
+      it_exports "HOME", "#{Dir.pwd}/app"
+      it_exports "MEMORY_LIMIT", "512m"
+      it_exports "TMPDIR", "#{Dir.pwd}/tmp"
+
+      context "when it has a DB" do
+        it_exports "DATABASE_URL", "postgresql://user:pass@host:5432/db"
+      end
+
+      context "when it does NOT have a DB" do
+        let(:services) { [] }
+
+        it_exports "DATABASE_URL", ""
+      end
+    end
+
+    describe "#user_environment_variables" do
+      let(:exported_variables) { subject.exported_user_environment_variables }
+
+      it_exports "A", "one_value"
+      it_exports "B", "with spaces"
+      it_exports "C", %Q[with'quotes"double]
+      it_exports "D", "referencing one_value"
+      it_exports "E", "with=equals"
+      it_exports "F", ""
+    end
+  end
+
+  describe "exported_environment_variables" do
+    let(:environment) { ["PORT=stupid idea"] }
+    let(:exported_variables) { subject.exported_environment_variables }
+
+    subject(:env) { Dea::Env.new(starting_message, instance) }
+
+    it_exports "PORT", "stupid idea"
   end
 end

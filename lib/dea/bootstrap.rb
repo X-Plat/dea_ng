@@ -387,8 +387,6 @@ module Dea
     end
 
     def create_instance(attributes)
-      attributes = Instance.translate_attributes(attributes)
-
       unless resource_manager.could_reserve?(attributes["limits"]["mem"], attributes["limits"]["disk"])
         message = "Unable to start instance: #{attributes["instance_index"]}"
         message << " for app: #{attributes["application_id"]}, not enough resources available."
