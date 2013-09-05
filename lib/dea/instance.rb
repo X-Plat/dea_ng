@@ -847,10 +847,19 @@ module Dea
           end
           if manifest && manifest["state_file"]
             manifest_path = container_relative_path(info.container_path, manifest["state_file"])
-            #p.deliver(promise_state_file_ready(manifest_path).resolve)
             p.deliver(promise_state_file_ready(manifest_path,start_timeout).resolve)
+          elsif attributes['instance_meta']['prod_ports'] # check port if defined raw_port in droplet.yml. TODO: UT
+            attributes['instance_meta']['prod_ports'].each_pair do | name, info |
+              port = info['host_port']
+              if promise_port_open(port,start_timeout).resolve 
+                log(:debug, "droplet.health-check.mutiport-check-success", :port => port)
+              else
+                log(:info, "droplet.health-check.mutiport-check-fail", :port => port)
+                p.deliver(false)
+              end
+            end  
+            p.deliver(true)
           elsif !application_uris.empty?
-            #p.deliver(promise_port_open(instance_host_port).resolve)
             p.deliver(promise_port_open(instance_host_port,start_timeout).resolve)
           else
             p.deliver(true)
