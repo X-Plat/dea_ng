@@ -568,6 +568,8 @@ module Dea
           cancel_health_check
         end
 
+        stat_collector.start
+
         # Fire off link so that the health check can be cancelled when the
         # instance crashes before the health check completes.
         link
@@ -700,16 +702,22 @@ module Dea
 
     def setup_stat_collector
       on(Transition.new(:resuming, :running)) do
-        log(:warn, "begin to start stat collector from :resuming, :running")
         stat_collector.start
       end
 
       on(Transition.new(:starting, :running)) do
-        log(:warn, "begin to start stat collector")
         stat_collector.start
       end
 
       on(Transition.new(:running, :stopping)) do
+        stat_collector.stop
+      end
+
+      on(Transition.new(:starting, :stopping)) do
+        stat_collector.stop
+      end
+
+      on(Transition.new(:starting, :crashed)) do
         stat_collector.stop
       end
 

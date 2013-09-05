@@ -3,18 +3,19 @@
 function start()
 {
   cd /home/work/dea_ng/bin 
-  nohup ruby dea ../config/dea.yml &
+  nohup ruby dea ../config/dea.yml > /dev/null 2>&1 &
+  sleep 1
 }
 
 function stop()
 {
   ps -ef | grep 'ruby de[a]' | awk '{print $2}' | xargs kill
+  while ps -ef | grep 'ruby de[a]' ;do sleep 1;done
 }
 
 function restart()
 {
   stop
-  while ps -ef | grep 'ruby de[a]' ;do sleep 1;done
   start
 }
 
