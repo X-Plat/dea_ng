@@ -149,10 +149,27 @@ module Buildpacks
       Buildpacks::Installer.new(Pathname.new(buildpack_path), app_dir, cache_dir)
     end
 
+    def curl_buildpack(buildpack_url)
+      buildpack_tarball = "/tmp/buildpacks/http-#{('a'..'z').to_a.sample(16).join}.tar.gz"
+      buildpack_path = "/tmp/buildpacks/http-#{('a'..'z').to_a.sample(16).join}"
+      curl_opts=" -s --retry 2 --retry-delay 3"
+      cmds=[]
+      cmds << "mkdir -p #{buildpack_path} "
+      cmds << "curl #{buildpack_url} #{curl_opts} -o #{buildpack_tarball} "
+      cmds << "tar pxzf #{buildpack_tarball} -C #{buildpack_path}  &>/dev/null"
+      cmds.each {|cmd| puts cmd ;raise "Failed to curl buildpack" unless system(cmd) }
+      Buildpacks::Installer.new(Pathname.new(buildpack_path), app_dir, cache_dir)
+    end
+
+    def http_url?(url)
+      /http:\/\//i.match(url)
+    end
+
     def build_pack
       return @build_pack if @build_pack
 
       custom_buildpack_url = environment["buildpack"]
+      return @build_pack = curl_buildpack(custom_buildpack_url) if http_url?(custom_buildpack_url)
       return @build_pack = clone_buildpack(custom_buildpack_url) if custom_buildpack_url
 
       @build_pack = installers.detect(&:detect)
