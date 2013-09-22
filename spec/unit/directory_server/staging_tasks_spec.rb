@@ -12,7 +12,7 @@ describe Dea::DirectoryServerV2::StagingTasks do
   include_context "tmpdir"
 
   let(:bootstrap) { mock(:bootstrap, :config => {}) }
-  let(:directory_server) { Dea::DirectoryServerV2.new("example.org", 1234, {}) }
+  let(:directory_server) { Dea::DirectoryServerV2.new("example.org", 1234, {"directory_server" => {"protocol" => "http"}}) }
 
   let(:staging_task_registry) { Dea::StagingTaskRegistry.new }
   let(:staging_task) { Dea::StagingTask.new(bootstrap, directory_server, valid_staging_attributes) }
@@ -75,7 +75,7 @@ describe Dea::DirectoryServerV2::StagingTasks do
 
         before do
           FileUtils.mkdir_p(container_rootfs_path)
-          staging_task.stub(:container_path => tmpdir)
+          staging_task.container.stub(:path).and_return(tmpdir)
         end
 
         context "when requested file does not exist" do

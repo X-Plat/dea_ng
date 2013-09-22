@@ -1,13 +1,12 @@
+require "yaml"
+require "fileutils"
 require "timeout"
 require "pathname"
 require "installer"
-require "rails_support"
 require "procfile"
 
 module Buildpacks
   class Buildpack
-    include RailsSupport
-
     attr_accessor :source_directory, :destination_directory, :staging_info_path, :environment_json
     attr_reader :procfile, :environment, :app_dir, :log_dir, :tmp_dir, :cache_dir, :buildpacks_path, :staging_timeout, :staging_info_name
 
@@ -57,7 +56,6 @@ module Buildpacks
 
         compile_with_timeout(staging_timeout)
 
-        stage_rails_console if rails_buildpack?(build_pack)
         save_buildpack_info
       end
     end
@@ -82,7 +80,7 @@ module Buildpacks
     def save_buildpack_info
       buildpack_info = {
         "detected_buildpack"  => build_pack.name,
-        "start_command" => start_command # TODO: change to just release info; calculate start command at runtime not compile time
+        "start_command" => start_command
       }
 
       File.open(File.join(destination_directory, staging_info_name), 'w') do |f|
@@ -96,7 +94,7 @@ module Buildpacks
         if custom_buildpack_url
           clone_buildpack(custom_buildpack_url)
         else
-          build_pack = installers.detect(&:detect)
+          build_pack = installers.find(&:detect)
           raise "Unable to detect a supported application type" unless build_pack
           build_pack
         end
@@ -123,10 +121,12 @@ module Buildpacks
     end
 
     def start_command
-      return environment["meta"]["command"] if environment["meta"] && environment["meta"]["command"]
-      procfile.web ||
-        release_info.fetch("default_process_types", {})["web"] ||
-        raise("Please specify a web start command in your manifest.yml or Procfile")
+      # remain compatible with components sending a command as part of staging
+      if environment["meta"] && environment["meta"]["command"]
+        return environment["meta"]["command"]
+      end
+
+      procfile.web || release_info.fetch("default_process_types", {})["web"]
     end
   end
 end

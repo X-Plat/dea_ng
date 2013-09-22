@@ -1,4 +1,5 @@
 require "dea/staging_task"
+require "dea/loggregator"
 
 module Dea::Responders
   class Staging
@@ -32,7 +33,9 @@ module Dea::Responders
     end
 
     def handle(message)
-      logger = logger_for_app(message.data["app_id"])
+      app_id = message.data["app_id"]
+      logger = logger_for_app(app_id)
+      Dea::Loggregator.emit(app_id, "Got staging request for app with id #{app_id}")
       logger.info("Got staging request with #{message.data.inspect}")
 
       task = Dea::StagingTask.new(bootstrap, dir_server, message.data, logger)
@@ -44,6 +47,8 @@ module Dea::Responders
       notify_stop(message, task)
 
       task.start
+    rescue => e
+      logger.error "staging.handle.failed", :error => e, :backtrace => e.backtrace
     end
 
     def handle_stop(message)
@@ -52,6 +57,8 @@ module Dea::Responders
           task.stop
         end
       end
+    rescue => e
+      logger.error "staging.handle_stop.failed", :error => e, :backtrace => e.backtrace
     end
 
     private
@@ -110,7 +117,6 @@ module Dea::Responders
       task.after_upload_callback do |error|
         respond_to_message(message, {
           :task_id => task.task_id,
-          :task_log => task.task_log,
           :error => (error.to_s if error),
           :detected_buildpack => task.detected_buildpack,
           :droplet_sha1 => task.droplet_sha1
@@ -133,7 +139,6 @@ module Dea::Responders
     def respond_to_message(message, params)
       message.respond(
         "task_id" => params[:task_id],
-        "task_log" => params[:task_log],
         "task_streaming_log_url" => params[:streaming_log_url],
         "detected_buildpack" => params[:detected_buildpack],
         "error" => params[:error],

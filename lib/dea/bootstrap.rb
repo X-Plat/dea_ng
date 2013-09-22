@@ -6,6 +6,8 @@ require "steno"
 require "steno/config"
 require "steno/core_ext"
 
+require "loggregator_emitter"
+
 require "thin"
 
 require "vcap/common"
@@ -24,6 +26,7 @@ require "dea/protocol"
 require "dea/resource_manager"
 require "dea/router_client"
 require "dea/staging_task"
+require "dea/loggregator"
 Dir[File.join(File.dirname(__FILE__), "responders/*.rb")].each { |f| require(f) }
 
 module Dea
@@ -66,6 +69,7 @@ module Dea
       validate_config
 
       setup_logging
+      setup_loggregator
       setup_droplet_registry
       setup_instance_registry
       setup_staging_task_registry
@@ -150,6 +154,12 @@ module Dea
 
     def setup_router_client
       @router_client = Dea::RouterClient.new(self)
+    end
+
+    def setup_loggregator
+      if @config["loggregator"] && @config["loggregator"]["router"]
+        Dea::Loggregator.emitter = LoggregatorEmitter::Emitter.new(@config["loggregator"]["router"], LogMessage::SourceType::DEA)
+      end
     end
 
     def setup_signal_handlers
@@ -361,7 +371,7 @@ module Dea
 
       snapshot = {
         "time"      => start.to_f,
-        "instances" => instances.map(&:attributes),
+        "instances" => instances.map(&:snapshot_attributes),
       }
 
       file = Tempfile.new("instances", File.join(config["base_dir"], "tmp"))
@@ -416,23 +426,11 @@ module Dea
 
       instance.on(Instance::Transition.new(:running, :stopping)) do
         router_client.unregister_instance(instance)
+        send_instance_stop_message(instance)
+      end
 
-        # This is a little wonky but ensures that we don't send an exited
-        # message twice. During evacuation, an exit message is sent for each
-        # running app, the evacuation interval is allowed to pass, and the app
-        # is finally stopped.  This allows the app to be started on another DEA
-        # and begin serving traffic before we stop it here.
-        if !evacuating?
-          reason = nil
-
-          if shutting_down?
-            reason = EXIT_REASON_SHUTDOWN
-          else
-            reason = EXIT_REASON_STOPPED
-          end
-
-          send_exited_message(instance, reason)
-        end
+      instance.on(Instance::Transition.new(:starting, :stopping)) do
+        send_instance_stop_message(instance)
       end
 
       instance.on(Instance::Transition.new(:starting, :running)) do
@@ -506,7 +504,7 @@ module Dea
 
     def handle_dea_stop(message)
       instances_filtered_by_message(message) do |instance|
-        next if !instance.running?
+        next unless instance.running? || instance.starting?
 
         instance.stop do |error|
           logger.warn("Failed stopping #{instance}: #{error}") if error
@@ -646,6 +644,20 @@ module Dea
       nats.publish("dea.shutdown", msg)
 
       nil
+    end
+
+    def send_instance_stop_message(instance)
+      # This is a little wonky but ensures that we don't send an exited
+      # message twice. During evacuation, an exit message is sent for each
+      # running app, the evacuation interval is allowed to pass, and the app
+      # is finally stopped.  This allows the app to be started on another DEA
+      # and begin serving traffic before we stop it here.
+      return if evacuating?
+
+      send_exited_message(
+        instance,
+        shutting_down? ? EXIT_REASON_SHUTDOWN : EXIT_REASON_STOPPED
+      )
     end
 
     def send_exited_message(instance, reason)

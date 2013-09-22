@@ -30,8 +30,6 @@ describe Dea::Env do
          instance_index: 37,
          state_starting_timestamp: Time.now.to_f,
          instance_container_port: 4567,
-         instance_console_container_port: 1234,
-         instance_debug_container_port: 2345
     )
   end
 
@@ -55,7 +53,6 @@ describe Dea::Env do
         "fds" => 16384},
       "cc_partition" => "default",
       "env" => environment,
-      "console" => true,
       "debug" => debug,
       "index" => 0
     }
@@ -65,6 +62,50 @@ describe Dea::Env do
     it "exports $#{name} as #{value}" do
       expect(`env | grep #{name}`).to be
       expect(`#{exported_variables} echo $#{name}`.chomp).to match value
+    end
+  end
+
+  describe "deciphering between staging and running" do
+    let (:start_message) { { "using" => "correct_env" } }
+    let (:staging_message) do
+      {
+        "using" => "wrong_env",
+        "start_message" => start_message
+      }
+    end
+
+    context "when an Instance is passed" do
+      it "finds the right ENV message for a runtime (instance) task" do
+        env = Dea::Env.new(start_message, instance)
+        env.message_json["using"].should == "correct_env"
+      end
+
+      it "creates a RunnningEnv" do
+        env = Dea::Env.new(start_message, instance)
+        env.strategy_env.should be_an_instance_of Dea::RunningEnv
+      end
+    end
+
+    context "when a StagerTask is passed" do
+      let (:staging_task) { mock "Fake StagingTask object" }
+
+      before do
+        staging_task.stub(:is_a).with(Dea::StagingTask).and_return(true)
+      end
+
+      it "finds the right ENV message for a compile task" do
+        staging_task.should_receive(:is_a?).with(Dea::StagingTask).and_return(true)
+
+        env = Dea::Env.new(staging_message, (staging_task))
+        env.message_json["using"].should == "correct_env"
+      end
+
+      it "finds creates a StagingEnv" do
+        staging_task.stub(:is_a?).with(Dea::StagingTask).and_return(true)
+
+        env = Dea::Env.new(staging_message, (staging_task))
+        env.strategy_env.should be_an_instance_of Dea::StagingEnv
+      end
     end
   end
 
@@ -129,15 +170,13 @@ describe Dea::Env do
         vcap_application.should be_a(Hash)
       end
 
-      keys = %W(
+      keys = %W[
         instance_id
         instance_index
-
         application_version
         application_name
         application_uris
-        application_users
-      )
+      ]
 
       keys.each do |key|
         it "includes #{key.inspect}" do
@@ -187,35 +226,19 @@ describe Dea::Env do
       it_exports "VCAP_APP_PORT", "4567"
       it_exports "VCAP_DEBUG_IP", ""
       it_exports "VCAP_DEBUG_PORT", ""
-      it_exports "VCAP_CONSOLE_IP", "0.0.0.0"
-      it_exports "VCAP_CONSOLE_PORT", "1234"
       it_exports "PORT", "4567"
-      it_exports "HOME", "#{Dir.pwd}/app"
       it_exports "MEMORY_LIMIT", "512m"
+      it_exports "HOME", "#{Dir.pwd}/app"
       it_exports "TMPDIR", "#{Dir.pwd}/tmp"
 
       context "when it has a DB" do
-        it_exports "DATABASE_URL", "postgresql://user:pass@host:5432/db"
+        it_exports "DATABASE_URL", "postgres://user:pass@host:5432/db"
       end
 
       context "when it does NOT have a DB" do
         let(:services) { [] }
 
         it_exports "DATABASE_URL", ""
-      end
-
-      context "when debug is set" do
-        let(:debug) { 'mode' }
-
-        it_exports "VCAP_DEBUG_MODE", "mode"
-        it_exports "VCAP_DEBUG_IP", "0.0.0.0"
-        it_exports "VCAP_DEBUG_PORT", "2345"
-      end
-
-      context "when debug mode is NOT set" do
-        before { instance.stub(:debug).and_return(nil) }
-
-        it_exports "VCAP_DEBUG_MODE", ""
       end
     end
 
@@ -246,7 +269,6 @@ describe Dea::Env do
           },
           "environment" => environment,
           "meta" => {
-            "console" => true,
             "command" => "some_command"
           }
         },
@@ -257,8 +279,16 @@ describe Dea::Env do
         "start_message" => starting_message
       }
     end
+    let(:staging_task) do
+      staging_task = mock(:staging_task)
+      staging_task.stub(:is_a?).with(Dea::StagingTask) { true }
+      staging_task.stub_chain(:workspace, platform_config_path: "a_platform_config_path")
+      staging_task.stub(:staging_config) { {"environment" => {"BUILDPACK_CACHE" => ""}} }
+      staging_task.stub(:staging_timeout) { 900 }
+      staging_task
+    end
 
-    subject(:env) { Dea::Env.new(staging_message) }
+    subject(:env) { Dea::Env.new(staging_message, staging_task) }
 
     describe "#vcap_services" do
       let(:vcap_services) { env.send(:vcap_services) }
@@ -318,12 +348,11 @@ describe Dea::Env do
         vcap_application.should be_a(Hash)
       end
 
-      keys = %W(
+      keys = %W[
         application_version
         application_name
         application_uris
-        application_users
-      )
+      ]
 
       keys.each do |key|
         it "includes #{key.inspect}" do
@@ -356,12 +385,10 @@ describe Dea::Env do
 
       it_exports "VCAP_APPLICATION", %r{\"mem\":512}
       it_exports "VCAP_SERVICES", %r{\"plan\":\"panda\"}
-      it_exports "HOME", "#{Dir.pwd}/app"
       it_exports "MEMORY_LIMIT", "512m"
-      it_exports "TMPDIR", "#{Dir.pwd}/tmp"
 
       context "when it has a DB" do
-        it_exports "DATABASE_URL", "postgresql://user:pass@host:5432/db"
+        it_exports "DATABASE_URL", "postgres://user:pass@host:5432/db"
       end
 
       context "when it does NOT have a DB" do

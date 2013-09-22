@@ -8,6 +8,7 @@ Bundler.require
 require 'tempfile'
 require 'timecop'
 require 'timeout'
+require 'socket'
 require_relative '../buildpacks/lib/buildpack'
 
 Dir["#{File.dirname(__FILE__)}/support/**/*.rb"].map { |f| require f }
@@ -18,6 +19,7 @@ RSpec.configure do |config|
   config.include BuildpackHelpers, :type => :integration
   config.include ProcessHelpers, :type => :integration
   config.include DeaHelpers, :type => :integration
+  config.include StagingHelpers, :type => :integration
 
   config.before do
     RSpecRandFix.call_kernel_srand # TODO: remove this once we have a fix
@@ -35,17 +37,21 @@ RSpec.configure do |config|
     Steno.init(Steno::Config.new(steno_config))
   end
 
-  config.before(:all, :type => :integration, :requires_warden => true) { dea_start }
+  config.before(:all, :type => :integration) do
+    start_file_server
+  end
 
-  config.after(:all, :type => :integration, :requires_warden => true) { dea_stop }
+  config.after(:all, :type => :integration) do
+    stop_file_server
+  end
 end
 
-STAGING_TEMP = Dir.mktmpdir
+TEST_TEMP = Dir.mktmpdir
 FILE_SERVER_DIR = "/tmp/dea"
 
 at_exit do
-  if File.directory?(STAGING_TEMP)
-    FileUtils.rm_r(STAGING_TEMP)
+  if File.directory?(TEST_TEMP)
+    FileUtils.rm_r(TEST_TEMP)
   end
 end
 

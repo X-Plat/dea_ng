@@ -6,6 +6,8 @@ gem "em-http-request"
 gem "em-warden-client", :git => "https://github.com/cloudfoundry/warden.git"
 gem "warden-client", :git => "https://github.com/cloudfoundry/warden.git"
 gem "warden-protocol", :git => "https://github.com/cloudfoundry/warden.git"
+gem "container_tools", :git => "https://github.com/cloudfoundry/container_tools.git"
+
 
 gem "nats", :require => "nats/client"
 gem "rack", :require => %w[rack/utils rack/mime]
@@ -21,10 +23,16 @@ gem "uuidtools", "~> 2.1.2"
 gem "nokogiri", ">= 1.4.4"
 gem "vmstat"
 
+gem "loggregator_emitter", "~> 0.0.11.pre"
+gem "loggregator_messages", "~> 0.0.5.pre"
+
 gem "sys-filesystem"
 
-group :test do
+group :development do
   gem "debugger"
+end
+
+group :test do
   gem "timecop"
   gem "patron"
   gem "foreman"
@@ -34,4 +42,5 @@ group :test do
   gem "rack-test"
   gem "rcov"
   gem "ci_reporter"
+  gem "net-ssh"
 end

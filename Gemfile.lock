@@ -1,4 +1,11 @@
 GIT
+  remote: https://github.com/cloudfoundry/container_tools.git
+  revision: 4cf1b80a98754ea3888cc6436e741ff022c0964f
+  specs:
+    container_tools (0.1)
+      em-warden-client
+
+GIT
   remote: https://github.com/cloudfoundry/steno.git
   revision: d88c70767c43a5eff32ccb47e3bb561b981e62e8
   specs:
@@ -26,7 +33,7 @@ GIT
 
 GIT
   remote: https://github.com/cloudfoundry/warden.git
-  revision: 609bbdfa0ea796ff0c140e937d475fa8081388fb
+  revision: 30d3df1d9709ea254f5cc005e7c8b7b9825d293b
   specs:
     em-warden-client (0.1.1)
       eventmachine
@@ -119,6 +126,10 @@ GEM
       chef (>= 0.10)
       highline
       thor (~> 0.15)
+    loggregator_emitter (0.0.11.pre)
+      loggregator_messages (~> 0.0.1.pre)
+    loggregator_messages (0.0.5.pre)
+      beefcake (~> 0.3.7)
     membrane (0.0.2)
     mime-types (1.23)
     mixlib-authentication (1.3.0)
@@ -200,6 +211,7 @@ PLATFORMS
 
 DEPENDENCIES
   ci_reporter
+  container_tools!
   debugger
   em-http-request
   em-warden-client!
@@ -207,7 +219,10 @@ DEPENDENCIES
   foreman
   grape!
   librarian
+  loggregator_emitter (~> 0.0.11.pre)
+  loggregator_messages (~> 0.0.5.pre)
   nats
+  net-ssh
   nokogiri (>= 1.4.4)
   patron
   rack

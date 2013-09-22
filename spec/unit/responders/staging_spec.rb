@@ -175,7 +175,6 @@ describe Dea::Responders::Staging do
           it "responds with successful message" do
             nats_mock.should_receive(:publish).with("respond-to", JSON.dump(
               "task_id" => "task-id",
-              "task_log" => nil,
               "task_streaming_log_url" => "streaming-log-url",
               "detected_buildpack" => nil,
               "error" => nil,
@@ -191,7 +190,6 @@ describe Dea::Responders::Staging do
           it "responds with error message" do
             nats_mock.should_receive(:publish).with("respond-to", JSON.dump(
               "task_id" => "task-id",
-              "task_log" => nil,
               "task_streaming_log_url" => "streaming-log-url",
               "detected_buildpack" => nil,
               "error" => "error-description",
@@ -204,13 +202,23 @@ describe Dea::Responders::Staging do
 
       describe "after staging completion" do
         context "when successfully" do
-          let(:start_message) { {"app_id" => "blah"} }
-          let(:message) { Dea::Nats::Message.new(nats, nil, {"start_message" => start_message}, "respond-to") }
+          let(:app_id) { "my_app_id" }
+          let(:start_message) { {"droplet" => "dff77854-3767-41d9-ab16-c8a824beb77a"} }
+          let(:message) { Dea::Nats::Message.new(nats, nil, {"app_id" => app_id, "start_message" => start_message}, "respond-to") }
           before { staging_task.stub(:after_complete_callback).and_yield(nil) }
 
           it "handles instance start with updated droplet sha" do
             bootstrap.should_receive(:start_app).with(start_message.merge({"sha1" => "some-droplet-sha"}))
             subject.handle(message)
+          end
+
+          it "logs to the loggregator" do
+            emitter = FakeEmitter.new
+            Dea::Loggregator.emitter = emitter
+
+            bootstrap.should_receive(:start_app)
+            subject.handle(message)
+            expect(emitter.messages[app_id][0]).to eql("Got staging request for app with id #{app_id}")
           end
         end
 
@@ -231,7 +239,6 @@ describe Dea::Responders::Staging do
           it "responds successful message" do
             nats_mock.should_receive(:publish).with("respond-to", JSON.dump(
               "task_id" => "task-id",
-              "task_log" => "task-log",
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
               "error" => nil,
@@ -254,7 +261,6 @@ describe Dea::Responders::Staging do
           it "responds with error message" do
             nats_mock.should_receive(:publish).with("respond-to", JSON.dump(
               "task_id" => "task-id",
-              "task_log" => "task-log",
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
               "error" => "error-description",
@@ -272,7 +278,6 @@ describe Dea::Responders::Staging do
           it "responds with error message" do
             nats_mock.should_receive(:publish).with("respond-to", JSON.dump(
               "task_id" => "task-id",
-              "task_log" => nil,
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
               "error" => "Error staging: task stopped",
@@ -283,6 +288,15 @@ describe Dea::Responders::Staging do
 
           it_unregisters_task
         end
+      end
+    end
+
+    describe "when an error occurs" do
+      let(:message) { Dea::Nats::Message.new(nats, nil, {}, "respond-to") }
+
+      it "catches the error since this is the top level" do
+        Dea::StagingTask.stub(:new).and_raise(RuntimeError, "Some Horrible thing happened")
+        expect { subject.handle(message) }.to_not raise_error
       end
     end
   end
@@ -297,6 +311,13 @@ describe Dea::Responders::Staging do
     it "stops all staging tasks with the given id" do
       staging_task.should_receive(:stop)
       subject.handle_stop(message)
+    end
+
+    describe "when an error occurs" do
+      it "catches the error since this is the top level" do
+        staging_task.stub(:stop).and_raise(RuntimeError, "Some Terrible Error")
+        expect { subject.handle_stop(message) }.to_not raise_error
+      end
     end
   end
 end

@@ -6,6 +6,9 @@ base_dir: /tmp/dea_ng
 logging:
   level: debug
 
+loggregator:
+  router: 127.0.0.1:3456
+
 resources:
   memory_mb: 2048
   memory_overcommit_factor: 2
@@ -37,6 +40,7 @@ dea_ruby: /usr/bin/ruby
 
 # For Go-based directory server
 directory_server:
+  protocol: 'http'
   v1_port: 4385
   v2_port: 5678
   file_api_port: 1234

@@ -8,17 +8,10 @@ require "dea/utils/upload"
 require "dea/promise"
 require "dea/task"
 require "dea/staging_task_workspace"
+require "dea/env"
 
 module Dea
   class StagingTask < Task
-    DROPLET_FILE = "droplet.tgz"
-    STAGING_LOG = "staging_task.log"
-
-    WARDEN_UNSTAGED_DIR = "/tmp/unstaged"
-    WARDEN_STAGED_DIR = "/tmp/staged"
-    WARDEN_STAGED_DROPLET = "/tmp/#{DROPLET_FILE}"
-    WARDEN_STAGING_LOG = "#{WARDEN_STAGED_DIR}/logs/#{STAGING_LOG}"
-
     class StagingError < StandardError
       def initialize(msg)
         super("Error staging: #{msg}")
@@ -31,7 +24,7 @@ module Dea
       end
     end
 
-    attr_reader :bootstrap, :dir_server, :attributes, :container_path, :task_id, :droplet_sha1
+    attr_reader :bootstrap, :dir_server, :attributes, :task_id, :droplet_sha1
 
     def initialize(bootstrap, dir_server, attributes, custom_logger=nil)
       super(bootstrap.config, custom_logger)
@@ -106,7 +99,7 @@ module Dea
         logger.info("Stopping staging task")
 
         @after_complete_callback = nil # Unregister after complete callback
-        promise_stop.resolve if container_handle
+        promise_stop.resolve if container.handle
         p.deliver
       end
 
@@ -171,7 +164,7 @@ module Dea
       Promise.new do |p|
         script = "mkdir -p #{workspace.warden_staged_dir}/logs && touch #{workspace.warden_staging_log}"
         logger.info("Preparing staging log: #{script}")
-        promise_warden_run(:app, script).resolve
+        container.run_script(:app, script)
         p.deliver
       end
     end
@@ -182,15 +175,17 @@ module Dea
         # See: https://github.com/heroku/heroku-buildpack-python/blob/master/bin/compile#L46
         # TODO possibly remove this if pull request is accepted
         script = "mkdir -p /app && touch /app/support_heroku_buildpacks && chown -R vcap:vcap /app"
-        promise_warden_run(:app, script, true).resolve
+        container.run_script(:app, script, true)
         p.deliver
       end
     end
 
     def promise_stage
       Promise.new do |p|
+        env = Env.new(attributes, self)
+
         script = [
-          staging_environment_variables,
+          env.exported_environment_variables,
           config["dea_ruby"],
           run_plugin_path,
           workspace.plugin_config_path,
@@ -200,7 +195,7 @@ module Dea
         logger.info("Staging: #{script}")
 
         Timeout.timeout(staging_timeout + staging_timeout_grace_period) do
-          promise_warden_run(:app, script).resolve
+          container.run_script(:app, script)
         end
 
         p.deliver
@@ -227,7 +222,7 @@ module Dea
       Promise.new do |p|
         logger.info("Unpacking app to #{workspace.warden_unstaged_dir}")
 
-        promise_warden_run(:app, <<-BASH).resolve
+        container.run_script(:app, <<-BASH)
           package_size=`du -h #{workspace.downloaded_droplet_path} | cut -f1`
           echo "-----> Downloaded app package ($package_size)" >> #{workspace.warden_staging_log}
           unzip -q #{workspace.downloaded_droplet_path} -d #{workspace.warden_unstaged_dir}
@@ -239,7 +234,7 @@ module Dea
 
     def promise_pack_app
       Promise.new do |p|
-        promise_warden_run(:app, <<-BASH).resolve
+        container.run_script(:app, <<-BASH)
           cd #{workspace.warden_staged_dir} &&
           COPYFILE_DISABLE=true tar -czf #{workspace.warden_staged_droplet} .
         BASH
@@ -249,16 +244,28 @@ module Dea
 
     def promise_app_download
       Promise.new do |p|
-        logger.info("Downloading application from #{attributes["download_uri"]}")
+        logger.info("staging.app-download.start", :uri => attributes["download_uri"])
+
+        start = Time.now
 
         Download.new(attributes["download_uri"], workspace.workspace_dir, nil, logger).download! do |error, path|
+          done = Time.now
+
           if error
+            logger.debug("staging.app-download.failed",
+              :duration => done - start,
+              :error => error,
+              :backtrace => error.backtrace)
+
             p.fail(error)
           else
             File.rename(path, workspace.downloaded_droplet_path)
             File.chmod(0744, workspace.downloaded_droplet_path)
 
-            logger.debug("Moved droplet to #{workspace.downloaded_droplet_path}")
+            logger.debug("staging.app-download.completed",
+              :duration => done - start,
+              :destination => workspace.downloaded_droplet_path)
+
             p.deliver
           end
         end
@@ -267,7 +274,7 @@ module Dea
 
     def promise_log_upload_started
       Promise.new do |p|
-        promise_warden_run(:app, <<-BASH).resolve
+        container.run_script(:app, <<-BASH)
           droplet_size=`du -h #{workspace.warden_staged_droplet} | cut -f1`
           echo "-----> Uploading droplet ($droplet_size)" >> #{workspace.warden_staging_log}
         BASH
@@ -343,22 +350,9 @@ module Dea
       end
     end
 
-    def promise_container_info
-      Promise.new do |p|
-        raise ArgumentError, "container handle must not be nil" unless container_handle
-
-        request = ::Warden::Protocol::InfoRequest.new(:handle => container_handle)
-        response = promise_warden_call(:info, request).resolve
-
-        raise RuntimeError, "container path is not available" unless @container_path = response.container_path
-
-        p.deliver(response)
-      end
-    end
-
     def promise_save_buildpack_cache
       Promise.new do |p|
-        resolve(promise_pack_buildpack_cache, "pack buildpack cache") do |error, result|
+        resolve_and_log(promise_pack_buildpack_cache, "pack buildpack cache") do |error, result|
           unless error
             promise_copy_out_buildpack_cache.resolve
             promise_buildpack_cache_upload.resolve
@@ -371,7 +365,7 @@ module Dea
     def promise_pack_buildpack_cache
       Promise.new do |p|
         # TODO: Ignore if warden cache is empty or does not exists
-        promise_warden_run(:app, <<-BASH).resolve
+        container.run_script(:app, <<-BASH)
           mkdir -p #{workspace.warden_cache} &&
           cd #{workspace.warden_cache} &&
           COPYFILE_DISABLE=true tar -czf #{workspace.warden_staged_buildpack_cache} .
@@ -385,7 +379,7 @@ module Dea
         if File.exists?(workspace.downloaded_buildpack_cache_path)
           logger.info("Unpacking buildpack cache to #{workspace.warden_cache}")
 
-          promise_warden_run(:app, <<-BASH).resolve
+          container.run_script(:app, <<-BASH)
           package_size=`du -h #{workspace.downloaded_buildpack_cache_path} | cut -f1`
           echo "-----> Downloaded app buildpack cache ($package_size)" >> #{workspace.warden_staging_log}
           mkdir -p #{workspace.warden_cache}
@@ -407,24 +401,47 @@ module Dea
     end
 
     def path_in_container(path)
-      File.join(container_path, "tmp", "rootfs", path.to_s) if container_path
+      File.join(container.path, "tmp", "rootfs", path.to_s) if container.path
     end
 
+    def staging_config
+      config["staging"]
+    end
+
+    def staging_timeout
+      (staging_config["max_staging_duration"] || "900").to_f
+    end
+
+    def bind_mounts
+      [workspace.workspace_dir, buildpack_dir].collect do |path|
+        {'src_path' => path, 'dst_path' => path}
+      end + config["bind_mounts"]
+    end
+
+    def buildpack_dir
+      File.expand_path("../../../buildpacks", __FILE__)
+    end
     private
 
     def resolve_staging_setup
       prepare_workspace
-
-      promises = [promise_app_download, promise_create_container]
+      with_network = false
+      container.create_container(bind_mounts,
+        disk_limit_in_bytes,
+        memory_limit_in_bytes,
+        with_network)
+      promises = [promise_app_download]
       promises << promise_buildpack_cache_download if attributes["buildpack_cache_download_uri"]
 
       Promise.run_in_parallel(*promises)
-      promise_limit_disk.resolve
-      promise_limit_memory.resolve
+      promise_update = Promise.new do |p|
+        container.update_path_and_ip
+        p.deliver
+      end
       Promise.run_in_parallel(
         promise_prepare_staging_log,
         promise_app_dir,
-        promise_container_info,
+        promise_update
       )
 
     rescue => e
@@ -462,36 +479,8 @@ module Dea
       File.join(buildpack_dir, "bin/run")
     end
 
-    def buildpack_dir
-      File.expand_path("../../../buildpacks", __FILE__)
-    end
-
-    def staging_environment_variables
-      env = attributes["properties"]["environment"] || []
-      env += %W[
-        PLATFORM_CONFIG=#{workspace.platform_config_path}
-        BUILDPACK_CACHE=#{staging_config["environment"]["BUILDPACK_CACHE"]}
-        STAGING_TIMEOUT=#{staging_timeout}
-        MEMORY_LIMIT=#{(config.minimum_staging_memory_mb).to_i}m
-      ]
-      env.map! do |var|
-        key, value = var.split("=", 2)
-        "export #{key}=#{Shellwords.escape(value)};"
-      end
-
-      env.join(" ")
-    end
-
-    def staging_timeout
-      (staging_config["max_staging_duration"] || "900").to_f
-    end
-
     def staging_timeout_grace_period
       60
-    end
-
-    def staging_config
-      config["staging"]
     end
   end
 end

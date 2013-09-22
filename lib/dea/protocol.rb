@@ -40,19 +40,10 @@ module Dea::Protocol::V1
         "file_uri"        => bootstrap.directory_server.uri,
         "credentials"     => bootstrap.directory_server.credentials,
         "staged"          => "/#{instance.instance_id}",
-        "console_ip"      => bootstrap.local_ip,
-        "console_port"    => instance.instance_console_host_port
       }
 
       if request.has_key?("path")
         response["file_uri_v2"] = bootstrap.directory_server_v2.instance_file_url_for(instance.instance_id, request["path"])
-      end
-
-      if instance.debug
-        response.update({
-          "debug_ip"   => bootstrap.local_ip,
-          "debug_port" => instance.instance_debug_host_port,
-        })
       end
 
       if request["include_stats"] && instance.running?

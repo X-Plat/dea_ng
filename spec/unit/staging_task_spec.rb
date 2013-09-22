@@ -23,7 +23,7 @@ describe Dea::StagingTask do
         "file_api_port" => 1234
       },
       "staging" => {
-        "environment" => {"BUILDPACK_CACHE" => "buildpack_cache_url"},
+        "environment" => { "BUILDPACK_CACHE" => "buildpack_cache_url" },
         "platform_config" => {},
         "memory_limit_mb" => memory_limit_mb,
         "disk_limit_mb" => disk_limit_mb,
@@ -44,8 +44,8 @@ describe Dea::StagingTask do
   let(:attributes) { valid_staging_attributes }
   let(:staging) { Dea::StagingTask.new(bootstrap, dir_server, attributes) }
 
-  let(:successful_promise) { Dea::Promise.new {|p| p.deliver } }
-  let(:failing_promise) { Dea::Promise.new {|p| raise "failing promise" } }
+  let(:successful_promise) { Dea::Promise.new { |p| p.deliver } }
+  let(:failing_promise) { Dea::Promise.new { |p| raise "failing promise" } }
 
   before do
     staging.stub(:workspace_dir) { workspace_dir }
@@ -56,55 +56,47 @@ describe Dea::StagingTask do
   end
 
   describe "#promise_stage" do
-    let(:attributes) { {"properties" => {"environment" => ["PATH=x", "FOO=z"]}} }
-
     it "assembles a shell command and initiates collection of task log" do
-      staging.should_receive(:promise_warden_run) do |_, cmd|
-        expect(cmd).to include %Q{export PATH=x;}
-        expect(cmd).to include %Q{export FOO=z;}
-        expect(cmd).to match %r{export PLATFORM_CONFIG=.+/platform_config;}
-        expect(cmd).to include %Q{export BUILDPACK_CACHE=buildpack_cache_url;}
-        expect(cmd).to include %Q{export STAGING_TIMEOUT=900.0;}
-        expect(cmd).to include "export MEMORY_LIMIT=#{memory_limit_mb}m;"
+      staging.container.should_receive(:run_script) do |_, cmd|
+        expect(cmd).to include %Q{export FOO="BAR";}
+        expect(cmd).to match %r{export PLATFORM_CONFIG=".+/platform_config";}
+        expect(cmd).to include %Q{export BUILDPACK_CACHE="buildpack_cache_url";}
+        expect(cmd).to include %Q{export STAGING_TIMEOUT="900.0";}
+        expect(cmd).to include %Q{export MEMORY_LIMIT="512m";} # the user assiged 512 should overwrite the system 256
+        expect(cmd).to include %Q{export VCAP_SERVICES="}
 
         expect(cmd).to match %r{.*/bin/run .*/plugin_config >> /tmp/staged/logs/staging_task.log 2>&1$}
-
-        mock("promise", :resolve => nil)
       end
       staging.promise_stage.resolve
     end
 
     context "when env variables need to be escaped" do
-      let(:attributes) { {"properties" => {"environment" => ["PATH=x y z", "FOO=z'y\"d", "BAR=", "BAZ=foo=baz"]}} }
+      before { attributes["start_message"]["env"] = ["PATH=x y z", "FOO=z'y\"d", "BAR=", "BAZ=foo=baz"] }
 
       it "copes with spaces" do
-        staging.should_receive(:promise_warden_run) do |_, cmd|
-          expect(cmd).to include(%Q{export PATH=x\\ y\\ z;})
-          mock("promise", :resolve => nil)
+        staging.container.should_receive(:run_script) do |_, cmd|
+          expect(cmd).to include(%Q{export PATH="x y z";})
         end
         staging.promise_stage.resolve
       end
 
       it "copes with quotes" do
-        staging.should_receive(:promise_warden_run) do |_, cmd|
-          expect(cmd).to include(%Q{export FOO=z\\'y\\\"d;})
-          mock("promise", :resolve => nil)
+        staging.container.should_receive(:run_script) do |_, cmd|
+          expect(cmd).to include(%Q{export FOO="z'y\\"d";})
         end
         staging.promise_stage.resolve
       end
 
       it "copes with blank" do
-        staging.should_receive(:promise_warden_run) do |_, cmd|
-          expect(cmd).to include(%Q{export BAR=\'\';})
-          mock("promise", :resolve => nil)
+        staging.container.should_receive(:run_script) do |_, cmd|
+          expect(cmd).to include(%Q{export BAR="";})
         end
         staging.promise_stage.resolve
       end
 
       it "copes with equal sign" do
-        staging.should_receive(:promise_warden_run) do |_, cmd|
-          expect(cmd).to include(%Q{export BAZ=foo\\=baz;})
-          mock("promise", :resolve => nil)
+        staging.container.should_receive(:run_script) do |_, cmd|
+          expect(cmd).to include(%Q{export BAZ="foo=baz";})
         end
         staging.promise_stage.resolve
       end
@@ -117,10 +109,8 @@ describe Dea::StagingTask do
         it "fails with a TimeoutError" do
           staging.stub(:staging_timeout_grace_period) { 0.5 }
 
-          staging.should_receive(:promise_warden_run) do
-            promise = mock("promise")
-            promise.should_receive(:resolve) { sleep 2 }
-            promise
+          staging.container.should_receive(:run_script) do
+            sleep 2
           end
 
           expect { staging.promise_stage.resolve }.to raise_error(TimeoutError)
@@ -131,10 +121,8 @@ describe Dea::StagingTask do
         it "does not time out" do
           staging.stub(:staging_timeout_grace_period) { 0.5 }
 
-          staging.should_receive(:promise_warden_run) do
-            promise = mock("promise")
-            promise.should_receive(:resolve) { sleep 0.75 }
-            promise
+          staging.container.should_receive(:run_script) do
+            sleep 0.75
           end
 
           expect { staging.promise_stage.resolve }.to_not raise_error
@@ -170,7 +158,7 @@ describe Dea::StagingTask do
 detected_buildpack: Ruby/Rack
 YAML
         staging_info = File.join(workspace_dir, "staging_info.yml")
-        File.open(staging_info, 'w') {|f| f.write(contents) }
+        File.open(staging_info, 'w') { |f| f.write(contents) }
       end
 
       it "parses staging info file" do
@@ -192,7 +180,7 @@ YAML
 detected_buildpack: Ruby/Rack
 YAML
       staging_info = File.join(workspace_dir, "staging_info.yml")
-      File.open(staging_info, 'w') {|f| f.write(contents) }
+      File.open(staging_info, 'w') { |f| f.write(contents) }
     end
 
     it "returns the detected buildpack" do
@@ -254,7 +242,9 @@ YAML
   describe "#path_in_container" do
     context "when given path is not nil" do
       context "when container path is set" do
-        before { staging.stub(:container_path => "/container/path") }
+        before do
+          staging.container.stub(:path).and_return("/container/path")
+        end
 
         it "returns path inside warden container root file system" do
           staging.path_in_container("path/to/file").should == "/container/path/tmp/rootfs/path/to/file"
@@ -262,7 +252,7 @@ YAML
       end
 
       context "when container path is not set" do
-        before { staging.stub(:container_path => nil) }
+        before { staging.container.stub(:path => nil) }
 
         it "returns nil" do
           staging.path_in_container("path/to/file").should be_nil
@@ -272,7 +262,9 @@ YAML
 
     context "when given path is nil" do
       context "when container path is set" do
-        before { staging.stub(:container_path => "/container/path") }
+        before do
+          staging.container.stub(:path).and_return("/container/path")
+        end
 
         it "returns path inside warden container root file system" do
           staging.path_in_container(nil).should == "/container/path/tmp/rootfs/"
@@ -295,15 +287,15 @@ YAML
       %w(
          app_download
          buildpack_cache_download
-         create_container
          limit_disk
          limit_memory
          prepare_staging_log
          app_dir
-         container_info
       ).each do |step|
         staging.stub("promise_#{step}").and_return(successful_promise)
       end
+      staging.container.stub(:create_container)
+      staging.container.stub(:update_path_and_ip)
     end
 
     def stub_staging
@@ -467,18 +459,41 @@ YAML
       end
     end
 
+    describe "#bind_mounts" do
+      it 'includes the workspace dir' do
+        staging.bind_mounts.should include('src_path' => staging.workspace.workspace_dir,
+                                              'dst_path' => staging.workspace.workspace_dir)
+      end
+
+      it 'includes the build pack url' do
+        staging.bind_mounts.should include('src_path' => staging.buildpack_dir,
+                                              'dst_path' => staging.buildpack_dir)
+      end
+
+      it 'includes the configured bind mounts' do
+        mount = {
+          'src_path' => 'a',
+          'dst_path' => 'b'
+        }
+        staging.config["bind_mounts"] = [mount]
+        staging.bind_mounts.should include(mount)
+      end
+    end
+
     it "performs staging setup operations in correct order" do
-      %w(prepare_workspace
-         promise_app_download
-         promise_create_container
-         promise_limit_disk
-         promise_limit_memory
+      with_network = false
+      staging.should_receive(:prepare_workspace).ordered.and_return(successful_promise)
+      staging.workspace.workspace_dir
+      staging.container.should_receive(:create_container).
+        with(staging.bind_mounts, staging.disk_limit_in_bytes, staging.memory_limit_in_bytes, with_network).ordered
+      %w(
+        promise_app_download
          promise_prepare_staging_log
          promise_app_dir
-         promise_container_info
       ).each do |step|
         staging.should_receive(step).ordered.and_return(successful_promise)
       end
+      staging.container.should_receive(:update_path_and_ip).ordered
 
       stub_staging
       stub_staging_upload
@@ -488,7 +503,7 @@ YAML
     context "when buildpack_cache_download_uri is provided" do
       before do
         staging.stub(:attributes).and_return(
-          valid_staging_attributes.merge({ "buildpack_cache_download_uri" => "http://some_url"}))
+          valid_staging_attributes.merge({ "buildpack_cache_download_uri" => "http://some_url" }))
       end
 
       it "downloads buildpack cache" do
@@ -586,7 +601,7 @@ YAML
 
   describe "#stop" do
     context "if container exists" do
-      before { staging.stub(:container_handle) { "maria" } }
+      before { staging.container.stub(:handle) { "maria" } }
       it "sends stop request to warden container" do
         staging.should_receive(:promise_stop).and_return(successful_promise)
         staging.stop
@@ -594,7 +609,7 @@ YAML
     end
 
     context "if container does not exist" do
-      before { staging.stub(:container_handle) { nil } }
+      before { staging.container.stub(:handle) { nil } }
       it "does NOT send stop request to warden container" do
         staging.should_not_receive(:promise_stop)
         staging.stop
@@ -649,7 +664,7 @@ YAML
       before do
         config["staging"].delete("disk_limit_mb")
       end
-      
+
       it "uses 2GB as a default" do
         staging.disk_limit_in_bytes.should eq(2*1024*1024*1024)
       end
@@ -658,70 +673,10 @@ YAML
 
   describe "#promise_prepare_staging_log" do
     it "assembles a shell command that creates staging_task.log file for tailing it" do
-      staging.should_receive(:promise_warden_run) do |connection_name, cmd|
+      staging.container.should_receive(:run_script) do |connection_name, cmd|
         cmd.should match "mkdir -p /tmp/staged/logs && touch /tmp/staged/logs/staging_task.log"
-        mock(:prepare_staging_log_promise, :resolve => nil)
       end
       staging.promise_prepare_staging_log.resolve
-    end
-  end
-
-  describe "#promise_container_info" do
-    def resolve_promise
-      staging.promise_container_info.resolve
-    end
-
-    context "when container handle is set" do
-      let(:warden_info_response) do
-        Warden::Protocol::InfoResponse.new(:container_path => "/container/path")
-      end
-
-      before { staging.stub(:container_handle => "container-handle") }
-
-      it "makes warden info request" do
-        staging.should_receive(:promise_warden_call).and_return do |type, request|
-          type.should == :info
-          request.handle.should == "container-handle"
-          mock(:promise, :resolve => warden_info_response)
-        end
-
-        resolve_promise
-      end
-
-      context "when container_path is provided" do
-        it "sets container_path" do
-          staging.stub(:promise_warden_call).and_return do
-            mock(:promise, :resolve => warden_info_response)
-          end
-
-          expect {
-            resolve_promise
-          }.to change { staging.container_path }.from(nil).to("/container/path")
-        end
-      end
-
-      context "when container_path is not provided" do
-        it "raises error" do
-          staging.stub(:promise_warden_call).and_return do
-            response = Warden::Protocol::InfoResponse.new
-            mock(:promise, :resolve => response)
-          end
-
-          expect {
-            resolve_promise
-          }.to raise_error(RuntimeError, /container path is not available/)
-        end
-      end
-    end
-
-    context "when container handle is not set" do
-      before { staging.stub(:container_handle => nil) }
-
-      it "raises error" do
-        expect {
-          resolve_promise
-        }.to raise_error(ArgumentError, /container handle must not be nil/)
-      end
     end
   end
 
@@ -733,7 +688,11 @@ YAML
     end
 
     context "when there is an error" do
-      before { Download.any_instance.stub(:download!).and_yield("This is an error", nil) }
+      before do
+        Download.any_instance.stub(:download!).and_yield(
+          RuntimeError.new("This is an error"), nil)
+      end
+
       it { expect { subject }.to raise_error(RuntimeError, "This is an error") }
     end
 
@@ -783,9 +742,8 @@ YAML
 
   describe "#promise_unpack_app" do
     it "assembles a shell command" do
-      staging.should_receive(:promise_warden_run) do |connection_name, cmd|
+      staging.container.should_receive(:run_script) do |connection_name, cmd|
         cmd.should include("unzip -q #{workspace_dir}/app.zip -d /tmp/unstaged")
-        mock("promise", :resolve => nil)
       end
 
       staging.promise_unpack_app.resolve
@@ -795,7 +753,7 @@ YAML
   describe "#promise_unpack_buildpack_cache" do
     context "when buildpack cache does not exist" do
       it "does not run a warden command" do
-        staging.should_not_receive(:promise_warden_run)
+        staging.container.should_not_receive(:run_script)
         staging.promise_unpack_buildpack_cache.resolve
       end
     end
@@ -806,9 +764,8 @@ YAML
       end
 
       it "assembles a shell command" do
-        staging.should_receive(:promise_warden_run) do |_, cmd|
+        staging.container.should_receive(:run_script) do |_, cmd|
           cmd.should include("tar xfz #{workspace_dir}/buildpack_cache.tgz -C /tmp/cache")
-          mock("promise", :resolve => nil)
         end
 
         staging.promise_unpack_buildpack_cache.resolve
@@ -818,9 +775,8 @@ YAML
 
   describe "#promise_pack_app" do
     it "assembles a shell command" do
-      staging.should_receive(:promise_warden_run) do |connection_name, cmd|
+      staging.container.should_receive(:run_script) do |connection_name, cmd|
         normalize_whitespace(cmd).should include("cd /tmp/staged && COPYFILE_DISABLE=true tar -czf /tmp/droplet.tgz .")
-        mock("promise", :resolve => nil)
       end
 
       staging.promise_pack_app.resolve
@@ -829,9 +785,8 @@ YAML
 
   describe "#promise_pack_buildpack_cache" do
     it "assembles a shell command" do
-      staging.should_receive(:promise_warden_run) do |_, cmd|
+      staging.container.should_receive(:run_script) do |_, cmd|
         normalize_whitespace(cmd).should include("cd /tmp/cache && COPYFILE_DISABLE=true tar -czf /tmp/buildpack_cache.tgz .")
-        mock("promise", :resolve => nil)
       end
 
       staging.promise_pack_buildpack_cache.resolve

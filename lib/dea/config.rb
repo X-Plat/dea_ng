@@ -32,6 +32,7 @@ module Dea
           "index" => Integer,
 
           "directory_server" => {
+            "protocol" => String,
             "v1_port" => Integer,
             "v2_port" => Integer,
             "file_api_port" => Integer,
@@ -62,8 +63,6 @@ module Dea
 
             optional("disk_mb") => Integer,
             optional("disk_overcommit_factor") => enum(Float, Integer),
-
-            optional("num_instances") => Integer,
           },
 
           optional("bind_mounts") => [{
@@ -121,6 +120,8 @@ module Dea
     end
 
     def minimum_staging_memory_mb
+      # FIXME: This is a bug
+      #[staging_task.config.minimum_staging_memory_mb.to_i, ].max
       @config.fetch("staging", {}).fetch("memory_limit_mb", 1024)
     end
 

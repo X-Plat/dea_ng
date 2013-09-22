@@ -2,6 +2,10 @@ require "yajl"
 require "timeout"
 
 class NatsHelper
+  def initialize(dea_config)
+    @dea_config = dea_config
+  end
+
   def connected?
     NATS.connected?
   end
@@ -14,11 +18,16 @@ class NatsHelper
     send_message(:publish, key, data, options)
   end
 
+  def with_nats(&blk)
+    NATS.start(:uri => nats_uri, &blk)
+  end
+
   def with_subscription(key)
     response = nil
 
-    NATS.start do
+    with_nats do
       yield if block_given?
+
       NATS.subscribe(key) do |resp|
         response = resp
         NATS.stop
@@ -31,7 +40,7 @@ class NatsHelper
   def make_blocking_request(key, message, number_of_expected_responses, timeout=10)
     responses = []
 
-    NATS.start do
+    with_nats do
       sid = NATS.request(key, Yajl::Encoder.encode(message), :max => number_of_expected_responses) do |response|
         response = Yajl::Parser.parse(response)
         responses << response
@@ -58,7 +67,7 @@ class NatsHelper
         response = resp
       end
     else
-      NATS.start do
+      with_nats do
         sid = NATS.public_send(method, key, Yajl::Encoder.encode(data)) do |resp|
           response = resp
           NATS.stop
@@ -71,5 +80,9 @@ class NatsHelper
     end
 
     Yajl::Parser.parse(response) if response
+  end
+
+  def nats_uri
+    @dea_config["nats_uri"]
   end
 end

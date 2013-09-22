@@ -1,6 +1,25 @@
+require "socket"
+
 module BuildpackHelpers
+  def file_server_address
+    ips = Socket.ip_address_list
+
+    ips.select!(&:ipv4?)
+
+    # skip 127.0.0.1
+    ips.reject!(&:ipv4_loopback?)
+
+    # this conflicts with the bosh-lite networking
+    ips.reject! { |ip| ip.ip_address.start_with?("192.168.50.") }
+
+    local_ip = ips.first
+    raise "Cannot determine an IP reachable from the VM." unless local_ip
+
+    "#{local_ip.ip_address}:9999"
+  end
+
   def fake_buildpack_url(buildpack_name)
-    "http://#{hostname}:9999/buildpacks/#{buildpack_name}/.git"
+    "http://#{file_server_address}/buildpacks/#{buildpack_name}/.git"
   end
 
   def setup_fake_buildpack(buildpack_name)
@@ -16,14 +35,8 @@ module BuildpackHelpers
   def download_tgz(url)
     Dir.mktmpdir do |dir|
       `curl --silent --show-error #{url} > #{dir}/staged_app.tgz`
-      `cd #{dir} && tar xzvf staged_app.tgz`
+      `cd #{dir} && tar xzf staged_app.tgz`
       yield dir
     end
-  end
-
-  private
-
-  def hostname
-    `hostname -I`.split(" ")[0]
   end
 end
