@@ -24,7 +24,6 @@ describe Dea::StagingTask do
       },
       "staging" => {
         "environment" => { "BUILDPACK_CACHE" => "buildpack_cache_url" },
-        "platform_config" => {},
         "memory_limit_mb" => memory_limit_mb,
         "disk_limit_mb" => disk_limit_mb,
         "max_staging_duration" => max_staging_duration
@@ -59,7 +58,6 @@ describe Dea::StagingTask do
     it "assembles a shell command and initiates collection of task log" do
       staging.container.should_receive(:run_script) do |_, cmd|
         expect(cmd).to include %Q{export FOO="BAR";}
-        expect(cmd).to match %r{export PLATFORM_CONFIG=".+/platform_config";}
         expect(cmd).to include %Q{export BUILDPACK_CACHE="buildpack_cache_url";}
         expect(cmd).to include %Q{export STAGING_TIMEOUT="900.0";}
         expect(cmd).to include %Q{export MEMORY_LIMIT="512m";} # the user assiged 512 should overwrite the system 256
@@ -205,37 +203,9 @@ YAML
   end
 
   describe "#prepare_workspace" do
-    describe "the plugin config file" do
-      subject do
-        staging.prepare_workspace
-        YAML.load_file("#{workspace_dir}/plugin_config")
-      end
-
-      it "has the right source, destination and cache directories" do
-        expect(subject["source_dir"]).to eq("/tmp/unstaged")
-        expect(subject["dest_dir"]).to eq("/tmp/staged")
-        expect(subject["cache_dir"]).to eq("/tmp/cache")
-      end
-
-      it "includes the specified environment config" do
-        environment_config = attributes["properties"]
-        expect(subject["environment"]).to eq(environment_config)
-      end
-
-      it "includes the staging info path" do
-        expect(subject["staging_info_name"]).to eq("staging_info.yml")
-      end
-    end
-
-    describe "the platform config file" do
-      subject do
-        staging.prepare_workspace
-        YAML.load_file("#{workspace_dir}/platform_config")
-      end
-
-      it "includes the cache directory path" do
-        expect(subject["cache"]).to eq("/tmp/cache")
-      end
+    it "should delegate to workspace" do
+      staging.workspace.should_receive(:prepare)
+      staging.prepare_workspace
     end
   end
 
@@ -419,7 +389,7 @@ YAML
     }
 
     it "should clean up after itself" do
-      staging.stub(:prepare_workspace).and_raise("Error")
+      staging.workspace.stub(:prepare).and_raise("Error")
       stub_staging_upload
 
       expect { staging.start }.to raise_error(/Error/)
@@ -466,8 +436,8 @@ YAML
       end
 
       it 'includes the build pack url' do
-        staging.bind_mounts.should include('src_path' => staging.buildpack_dir,
-                                              'dst_path' => staging.buildpack_dir)
+        staging.bind_mounts.should include('src_path' => staging.workspace.buildpack_dir,
+                                           'dst_path' => staging.workspace.buildpack_dir)
       end
 
       it 'includes the configured bind mounts' do
@@ -482,14 +452,14 @@ YAML
 
     it "performs staging setup operations in correct order" do
       with_network = false
-      staging.should_receive(:prepare_workspace).ordered.and_return(successful_promise)
+      staging.workspace.should_receive(:prepare).ordered
       staging.workspace.workspace_dir
       staging.container.should_receive(:create_container).
         with(staging.bind_mounts, staging.disk_limit_in_bytes, staging.memory_limit_in_bytes, with_network).ordered
       %w(
         promise_app_download
-         promise_prepare_staging_log
-         promise_app_dir
+        promise_prepare_staging_log
+        promise_app_dir
       ).each do |step|
         staging.should_receive(step).ordered.and_return(successful_promise)
       end

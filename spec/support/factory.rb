@@ -1,6 +1,7 @@
 # coding: UTF-8
 
 module Helpers
+  #let(:admin_buildpacks)
   def valid_service_attributes(syslog_drain_url = nil)
     {
       "name"        => "name",

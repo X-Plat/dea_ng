@@ -9,6 +9,7 @@ require "dea/promise"
 require "dea/task"
 require "dea/staging_task_workspace"
 require "dea/env"
+require "dea/admin_buildpack_downloader"
 
 module Dea
   class StagingTask < Task
@@ -66,7 +67,7 @@ module Dea
     end
 
     def workspace
-      @workspace ||= StagingTaskWorkspace.new(config["base_dir"])
+      @workspace ||= StagingTaskWorkspace.new(config["base_dir"], attributes["admin_buildpacks"], attributes["properties"])
     end
 
     def task_log
@@ -146,18 +147,7 @@ module Dea
     private :trigger_after_stop
 
     def prepare_workspace
-      plugin_config = {
-        "source_dir" => workspace.warden_unstaged_dir,
-        "dest_dir" => workspace.warden_staged_dir,
-        "cache_dir" => workspace.warden_cache,
-        "environment" => attributes["properties"],
-        "staging_info_name" => Dea::StagingTaskWorkspace::STAGING_INFO
-      }
-
-      platform_config = staging_config["platform_config"].merge("cache" => workspace.warden_cache)
-
-      File.open(workspace.plugin_config_path, 'w') { |f| YAML.dump(plugin_config, f) }
-      File.open(workspace.platform_config_path, "w") { |f| YAML.dump(platform_config, f) }
+      workspace.prepare
     end
 
     def promise_prepare_staging_log
@@ -413,18 +403,15 @@ module Dea
     end
 
     def bind_mounts
-      [workspace.workspace_dir, buildpack_dir].collect do |path|
+      [workspace.workspace_dir, workspace.buildpack_dir, workspace.admin_buildpacks_dir].collect do |path|
         {'src_path' => path, 'dst_path' => path}
       end + config["bind_mounts"]
     end
 
-    def buildpack_dir
-      File.expand_path("../../../buildpacks", __FILE__)
-    end
     private
 
     def resolve_staging_setup
-      prepare_workspace
+      workspace.prepare
       with_network = false
       container.create_container(bind_mounts,
         disk_limit_in_bytes,
@@ -471,12 +458,8 @@ module Dea
       promise_save_buildpack_cache.resolve
     end
 
-    def paths_to_bind
-      [workspace.workspace_dir, buildpack_dir]
-    end
-
     def run_plugin_path
-      File.join(buildpack_dir, "bin/run")
+      File.join(workspace.buildpack_dir, "bin/run")
     end
 
     def staging_timeout_grace_period

@@ -28,11 +28,8 @@ gem "loggregator_messages", "~> 0.0.5.pre"
 
 gem "sys-filesystem"
 
-group :development do
-  gem "debugger"
-end
-
 group :test do
+  gem "debugger"
   gem "timecop"
   gem "patron"
   gem "foreman"
@@ -43,4 +40,7 @@ group :test do
   gem "rcov"
   gem "ci_reporter"
   gem "net-ssh"
+  gem "webmock"
+  gem "rubyzip"
+  gem "debugger"
 end
