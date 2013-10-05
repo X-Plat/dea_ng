@@ -27,13 +27,14 @@ module Dea
 
     attr_reader :bootstrap, :dir_server, :attributes, :task_id, :droplet_sha1
 
-    def initialize(bootstrap, dir_server, attributes, custom_logger=nil)
+    def initialize(bootstrap, dir_server, attributes, buildpacks_in_use, custom_logger=nil)
       super(bootstrap.config, custom_logger)
 
       @bootstrap = bootstrap
       @dir_server = dir_server
       @attributes = attributes.dup
       @task_id = attributes["task_id"]
+      @buildpacks_in_use = buildpacks_in_use
 
       logger.user_data[:task_id] = task_id
     end
@@ -67,7 +68,10 @@ module Dea
     end
 
     def workspace
-      @workspace ||= StagingTaskWorkspace.new(config["base_dir"], attributes["admin_buildpacks"], attributes["properties"])
+      @workspace ||= StagingTaskWorkspace.new(config["base_dir"],
+                                              admin_buildpacks,
+                                              @buildpacks_in_use,
+                                              attributes["properties"])
     end
 
     def task_log
@@ -237,8 +241,10 @@ module Dea
         logger.info("staging.app-download.start", :uri => attributes["download_uri"])
 
         start = Time.now
+        download_droplet_file = File.new(workspace.downloaded_droplet_path, "w")
+        File.chmod(0744, download_droplet_file.path)
 
-        Download.new(attributes["download_uri"], workspace.workspace_dir, nil, logger).download! do |error, path|
+        Download.new(attributes["download_uri"], download_droplet_file, nil, logger).download! do |error|
           done = Time.now
 
           if error
@@ -246,16 +252,11 @@ module Dea
               :duration => done - start,
               :error => error,
               :backtrace => error.backtrace)
-
             p.fail(error)
           else
-            File.rename(path, workspace.downloaded_droplet_path)
-            File.chmod(0744, workspace.downloaded_droplet_path)
-
             logger.debug("staging.app-download.completed",
               :duration => done - start,
-              :destination => workspace.downloaded_droplet_path)
-
+              :destination => download_droplet_file.path)
             p.deliver
           end
         end
@@ -302,14 +303,14 @@ module Dea
       Promise.new do |p|
         logger.info("Downloading buildpack cache from #{attributes["buildpack_cache_download_uri"]}")
 
-        Download.new(attributes["buildpack_cache_download_uri"], workspace.workspace_dir, nil, logger).download! do |error, path|
+        buildpack_cache = File.new(workspace.downloaded_buildpack_cache_path, "w")
+        File.chmod(0744, buildpack_cache.path)
+
+        Download.new(attributes["buildpack_cache_download_uri"], buildpack_cache, nil, logger).download! do |error|
           if error
             logger.error("Failed to download buildpack cache from #{attributes["buildpack_cache_download_uri"]}")
           else
-            File.rename(path, workspace.downloaded_buildpack_cache_path)
-            File.chmod(0744, workspace.downloaded_buildpack_cache_path)
-
-            logger.debug("Moved droplet to #{workspace.downloaded_buildpack_cache_path}")
+            logger.debug("Downloaded droplet to #{buildpack_cache.path}")
           end
 
           p.deliver
@@ -406,6 +407,10 @@ module Dea
       [workspace.workspace_dir, workspace.buildpack_dir, workspace.admin_buildpacks_dir].collect do |path|
         {'src_path' => path, 'dst_path' => path}
       end + config["bind_mounts"]
+    end
+
+    def admin_buildpacks
+      @attributes["admin_buildpacks"]
     end
 
     private

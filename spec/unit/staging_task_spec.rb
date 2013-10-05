@@ -18,7 +18,7 @@ describe Dea::StagingTask do
 
   let(:config) do
     {
-      "base_dir" => Dir.mktmpdir("base_dir"),
+      "base_dir" => base_dir,
       "directory_server" => {
         "file_api_port" => 1234
       },
@@ -31,6 +31,7 @@ describe Dea::StagingTask do
     }
   end
 
+  let(:base_dir) { Dir.mktmpdir("base_dir") }
   let(:bootstrap) { mock(:bootstrap, :config => Dea::Config.new(config)) }
   let(:dir_server) { Dea::DirectoryServerV2.new("domain", 1234, config) }
 
@@ -41,10 +42,12 @@ describe Dea::StagingTask do
   end
 
   let(:attributes) { valid_staging_attributes }
-  let(:staging) { Dea::StagingTask.new(bootstrap, dir_server, attributes) }
-
+  let(:staging) { Dea::StagingTask.new(bootstrap, dir_server, attributes, buildpacks_in_use) }
+  let(:buildpacks_in_use) { ["buildpack1", "buildpack2"] }
   let(:successful_promise) { Dea::Promise.new { |p| p.deliver } }
   let(:failing_promise) { Dea::Promise.new { |p| raise "failing promise" } }
+
+  after { FileUtils.rm_rf(workspace_dir) if File.exists?(workspace_dir) }
 
   before do
     staging.stub(:workspace_dir) { workspace_dir }
@@ -206,6 +209,29 @@ YAML
     it "should delegate to workspace" do
       staging.workspace.should_receive(:prepare)
       staging.prepare_workspace
+    end
+
+    it "should pass the list of buildpacks in use to the workspace" do
+      Dea::StagingTaskWorkspace.should_receive(:new).with(
+        base_dir,
+        valid_staging_attributes["admin_buildpacks"],
+        buildpacks_in_use,
+        valid_staging_attributes["properties"]
+      ).and_return(Struct.new(:prepare).new(nil))
+
+      new_staging = Dea::StagingTask.new(bootstrap, dir_server, attributes, buildpacks_in_use)
+      new_staging.prepare_workspace
+    end
+  end
+
+  describe "#admin_buildpacks" do
+
+    let(:attributes) do
+      valid_staging_attributes.merge( { "admin_buildpacks" => %w(a b c) } )
+    end
+
+    it "returns the list of buildpacks passed in the constructor" do
+      expect(staging.admin_buildpacks).to eq(%w(a b c))
     end
   end
 
@@ -657,10 +683,12 @@ YAML
       promise
     end
 
+    let(:staging_app_file_path) { "#{workspace_dir}/app.zip" }
+
     context "when there is an error" do
       before do
         Download.any_instance.stub(:download!).and_yield(
-          RuntimeError.new("This is an error"), nil)
+          RuntimeError.new("This is an error"))
       end
 
       it { expect { subject }.to raise_error(RuntimeError, "This is an error") }
@@ -668,16 +696,14 @@ YAML
 
     context "when there is no error" do
       before do
-        File.stub(:rename)
-        File.stub(:chmod)
-        Download.any_instance.stub(:download!).and_yield(nil, "/path/to/file")
+        Download.any_instance.stub(:download!).and_yield(nil)
       end
       its(:result) { should == [:deliver, nil] }
 
       it "should rename the file" do
-        File.should_receive(:rename).with("/path/to/file", "#{workspace_dir}/app.zip")
-        File.should_receive(:chmod).with(0744, "#{workspace_dir}/app.zip")
         subject
+        expect(File.exists?(staging_app_file_path)).to be_true
+        expect(sprintf("%o", File.stat(staging_app_file_path).mode)).to eq "100744"
       end
     end
   end
@@ -689,23 +715,23 @@ YAML
       promise
     end
 
+    let(:buildpack_cache_dest) { File.join workspace_dir, "buildpack_cache.tgz" }
+
     context "when there is an error" do
-      before { Download.any_instance.stub(:download!).and_yield("This is an error", nil) }
-      its(:result) { should == [:deliver, nil] }
+      before { Download.any_instance.stub(:download!).and_yield("This is an error") }
+
+      its(:result) { should eq([:deliver, nil]) }
     end
 
     context "when there is no error" do
-      before do
-        File.stub(:rename)
-        File.stub(:chmod)
-        Download.any_instance.stub(:download!).and_yield(nil, "/path/to/file")
-      end
-      its(:result) { should == [:deliver, nil] }
+      before { Download.any_instance.stub(:download!).and_yield(nil) }
+
+      its(:result) { should eq([:deliver, nil]) }
 
       it "should rename the file" do
-        File.should_receive(:rename).with("/path/to/file", "#{workspace_dir}/buildpack_cache.tgz")
-        File.should_receive(:chmod).with(0744, "#{workspace_dir}/buildpack_cache.tgz")
         subject
+        expect(File.exists?(buildpack_cache_dest)).to be_true
+        expect(sprintf("%o", File.stat(buildpack_cache_dest).mode)).to eq "100744"
       end
     end
   end

@@ -69,6 +69,61 @@ describe "Staging an app", :type => :integration, :requires_warden => true do
       expect(staging_log).to include("-----> Some admin compilation output")
       expect(response["error"]).to be_nil
     end
+
+    context "when having 2 admin buildpacks" do
+      let(:admin_buildpacks) do
+        [
+          {
+            "url" => "http://#{file_server_address}/admin_buildpacks/admin_buildpack",
+            "key" => "abcdef"
+          },
+          {
+            "url" => "http://#{file_server_address}/admin_buildpacks/start_command",
+            "key" => "xyz"
+          }
+        ]
+      end
+
+      context "and a specific buildpack is requested by key" do
+        let(:properties) { {"buildpack_key" => "xyz", "environment" => env, "resources" => limits} }
+
+        it "uses the one specified in the message" do
+          response, staging_log = perform_stage_request(staging_message)
+          expect(staging_log).to include("-----> Some compilation output")
+          expect(response["error"]).to be_nil
+        end
+      end
+    end
+
+    context "after the buildpack is deleted" do
+      context "when one app has been previously deployed with the buildpack we're going to delete" do
+        before do
+          perform_stage_request(staging_message)
+        end
+
+        def stage_with_no_admin_buildpacks
+          staging_message_with_deleted_buildpacks = staging_message.dup
+          staging_message_with_deleted_buildpacks["admin_buildpacks"] = []
+          perform_stage_request(staging_message_with_deleted_buildpacks)
+        end
+
+        it "no longer stages the app with the admin buildpack" do
+          response, staging_log = stage_with_no_admin_buildpacks
+          expect(staging_log).to_not include("-----> Some admin compilation output")
+        end
+
+        it "deletes the buildpack from the filesystem" do
+          expect {
+            stage_with_no_admin_buildpacks
+          }.to change{ admin_buildpack_dir_size }.from(1).to(0)
+        end
+
+        def admin_buildpack_dir_size
+          admin_buildpack_dir = File.join(dea_config["base_dir"], "admin_buildpacks")
+          (Dir.entries(admin_buildpack_dir) - [".", ".."]).size
+        end
+      end
+    end
   end
 
   context "when a buildpack url is specified" do
@@ -171,9 +226,9 @@ describe "Staging an app", :type => :integration, :requires_warden => true do
           NATS.publish("dea.locate", Yajl::Encoder.encode({})) do
             NATS.subscribe("dea.advertise") do |resp|
               available_memory_while_staging = Yajl::Parser.parse(resp)["available_memory"]
-            end
 
-            NATS.publish("staging.stop", Yajl::Encoder.encode({"app_id" => app_id}))
+              NATS.publish("staging.stop", Yajl::Encoder.encode({"app_id" => app_id}))
+            end
           end
         end
       end
