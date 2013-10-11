@@ -38,7 +38,7 @@ Dir[File.join(File.dirname(__FILE__), "responders/*.rb")].each { |f| require(f) 
 module Dea
   class Bootstrap
     DEFAULT_HEARTBEAT_INTERVAL = 10 # In secs
-    DROPLET_REAPER_INTERVAL_SECS = 10
+    DROPLET_REAPER_INTERVAL_SECS = 60
 
     DISCOVER_DELAY_MS_PER_INSTANCE = 10
     DISCOVER_DELAY_MS_MEM = 100
@@ -378,6 +378,7 @@ module Dea
       snapshot = {
         "time"      => start.to_f,
         "instances" => instances.map(&:snapshot_attributes),
+        "staging_tasks" => staging_task_registry.map(&:attributes)
       }
 
       file = Tempfile.new("instances", File.join(config["base_dir"], "tmp"))

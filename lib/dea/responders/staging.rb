@@ -36,11 +36,14 @@ module Dea::Responders
     def handle(message)
       app_id = message.data["app_id"]
       logger = logger_for_app(app_id)
+
       Dea::Loggregator.emit(app_id, "Got staging request for app with id #{app_id}")
-      logger.info("Got staging request with #{message.data.inspect}")
+      logger.info("staging.handle.start", request: message.data)
 
       task = Dea::StagingTask.new(bootstrap, dir_server, message.data, buildpacks_in_use, logger)
       staging_task_registry.register(task)
+
+      bootstrap.save_snapshot
 
       notify_setup_completion(message, task)
       notify_completion(message, task)
@@ -49,7 +52,7 @@ module Dea::Responders
 
       task.start
     rescue => e
-      logger.error "staging.handle.failed", :error => e, :backtrace => e.backtrace
+      logger.error "staging.handle.failed", error: e, backtrace: e.backtrace
     end
 
     def handle_stop(message)
@@ -124,6 +127,8 @@ module Dea::Responders
         })
 
         staging_task_registry.unregister(task)
+
+        bootstrap.save_snapshot
       end
     end
 
@@ -133,7 +138,10 @@ module Dea::Responders
           :task_id => task.task_id,
           :error => (error.to_s if error),
         })
+
         staging_task_registry.unregister(task)
+
+        bootstrap.save_snapshot
       end
     end
 
