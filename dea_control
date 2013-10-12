@@ -3,8 +3,7 @@
 function start()
 {
   cd /home/work/dea_ng/bin 
-  nohup ruby dea ../config/dea.yml > /dev/null 2>&1 &
-  sleep 1
+  ruby dea ../config/dea.yml > /dev/null 2>&1 &
 }
 
 function stop()
@@ -22,6 +21,6 @@ function restart()
 case ${1:-"other"} in
   start) start ;;
   stop) stop ;;
-  restart) restart ;;
+  restart|re) restart ;;
   *) echo "Usage: $0 start|stop|restart" ;;
 esac
