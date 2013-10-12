@@ -223,7 +223,9 @@ module Dea
     end
 
     def trap_usr1
-      exit
+      send_shutdown_message
+      locator_responders.each(&:stop)
+      ignore_signals
     end
 
     def trap_usr2
@@ -325,6 +327,11 @@ module Dea
     def start_finish
       nats.publish("dea.start", Dea::Protocol::V1::HelloMessage.generate(self))
       locator_responders.map(&:advertise)
+
+      unless instance_registry.empty?
+        logger.info("Loaded #{instance_registry.size} instances from snapshot")
+        send_heartbeat(instance_registry.to_a)
+      end
     end
 
     def register_directory_server_v2
@@ -344,6 +351,8 @@ module Dea
     end
 
     def start
+      load_snapshot
+
       start_component
       start_nats
       start_directory_server
@@ -388,6 +397,37 @@ module Dea
       FileUtils.mv(file.path, snapshot_path)
 
       logger.debug("Saving snapshot took: %.3fs" % [Time.now - start])
+    end
+
+    def load_snapshot
+      return unless File.exist?(snapshot_path)
+
+      start = Time.now
+
+      snapshot = ::Yajl::Parser.parse(File.read(snapshot_path))
+      snapshot ||= {}
+
+      if snapshot["instances"]
+        snapshot["instances"].each do |attributes|
+          instance_state = attributes.delete("state")
+          instance = create_instance(attributes)
+          next unless instance
+
+          # Ignore instance if it doesn't validate
+          begin
+            instance.validate
+          rescue => error
+            logger.warn("Error validating instance: #{error.message}")
+            next
+          end
+
+          # Enter instance state via "RESUMING" to trigger the right transitions
+          instance.state = Instance::State::RESUMING
+          instance.state = instance_state
+        end
+
+        logger.debug("Loading snapshot took: %.3fs" % [Time.now - start])
+      end
     end
 
     def reap_unreferenced_droplets
@@ -522,6 +562,7 @@ module Dea
     def handle_dea_update(message)
       app_id = message.data["droplet"].to_s
       uris = message.data["uris"]
+      app_version = message.data["version"]
 
       instance_registry.instances_for_application(app_id).each do |_, instance|
         current_uris = instance.application_uris
@@ -540,6 +581,7 @@ module Dea
         end
 
         instance.application_uris = uris
+        instance.application_version = app_version if app_version
       end
     end
 
