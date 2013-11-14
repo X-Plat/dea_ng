@@ -1,27 +1,34 @@
 # coding: UTF-8
 
 require "spec_helper"
-require "dea/bootstrap"
+require "dea/snapshot"
 
-describe "snapshot" do
-  include_context "bootstrap_setup"
+describe Dea::Snapshot do
+  let(:staging_task_registry) { double(:staging_task_registry) }
+  let(:instance_registry) { double(:instance_registry) }
+  let(:base_dir) { Dir.mktmpdir }
+  let(:instance_manager) { double(:instance_manager, :create_instance => nil) }
+  let(:bootstrap) { double(:bootstrap, :config => {}) }
+
+  let(:snapshot) { described_class.new(staging_task_registry, instance_registry, base_dir, instance_manager) }
 
   before do
-    bootstrap.unstub(:save_snapshot)
-    bootstrap.unstub(:load_snapshot)
+    FileUtils.mkdir_p(File.join(base_dir, "tmp"))
+    FileUtils.mkdir_p(File.join(base_dir, "db"))
+  end
 
-    bootstrap.unstub(:setup_directories)
-    bootstrap.setup_directories
+  after do
+    FileUtils.rm_rf(base_dir)
   end
 
   describe "save" do
-    let(:staging_tasks) do
+    let(:staging_task_registry) do
       [ Dea::StagingTask.new(bootstrap, nil, StagingMessage.new(valid_staging_attributes), nil),
         Dea::StagingTask.new(bootstrap, nil, StagingMessage.new(valid_staging_attributes), nil),
       ]
     end
 
-    let(:instances) do
+    let(:instance_registry) do
       instances = []
 
       # Create an instance in every state
@@ -37,29 +44,24 @@ describe "snapshot" do
       instances
     end
 
-    before do
-      bootstrap.stub(:instance_registry).and_return(instances)
-      bootstrap.stub(:staging_task_registry).and_return(staging_tasks)
-    end
-
     it "saves the timestamp to the snapshot" do
-      bootstrap.save_snapshot
+      snapshot.save
 
-      snapshot = ::Yajl::Parser.parse(File.read(bootstrap.snapshot_path))
-      snapshot["time"].should be_within(1.0).of(Time.now.to_f)
+      saved_snapshot = ::Yajl::Parser.parse(File.read(snapshot.path))
+      saved_snapshot["time"].should be_within(1.0).of(Time.now.to_f)
     end
 
     it "saves the instance registry" do
-      bootstrap.save_snapshot
+      snapshot.save
 
-      snapshot = ::Yajl::Parser.parse(File.read(bootstrap.snapshot_path))
+      saved_snapshot = ::Yajl::Parser.parse(File.read(snapshot.path))
 
       expected_states = [
         Dea::Instance::State::RUNNING,
         Dea::Instance::State::CRASHED,
       ].sort.uniq
 
-      actual_states = snapshot["instances"].map do |attributes|
+      actual_states = saved_snapshot["instances"].map do |attributes|
         attributes["state"]
       end.sort.uniq
 
@@ -67,25 +69,23 @@ describe "snapshot" do
     end
 
     it "saves the staging task registry" do
-      bootstrap.save_snapshot
+      snapshot.save
 
-      snapshot = ::Yajl::Parser.parse(File.read(bootstrap.snapshot_path))
+      saved_snapshot = ::Yajl::Parser.parse(File.read(snapshot.path))
 
-      expect(snapshot["staging_tasks"].size).to eq(2)
+      expect(saved_snapshot["staging_tasks"].size).to eq(2)
 
-      expect(snapshot["staging_tasks"][0]).to include(
-        "task_id" => staging_tasks[0].task_id)
+      expect(saved_snapshot["staging_tasks"][0]).to include("task_id" => staging_task_registry[0].task_id)
 
-      expect(snapshot["staging_tasks"][1]).to include(
-        "task_id" => staging_tasks[1].task_id)
+      expect(saved_snapshot["staging_tasks"][1]).to include("task_id" => staging_task_registry[1].task_id)
     end
 
-    context 'instances fields' do
+    context "instances fields" do
       before do
-        bootstrap.save_snapshot
-        snapshot = ::Yajl::Parser.parse(File.read(bootstrap.snapshot_path))
-        snapshot["time"].should be_within(1.0).of(Time.now.to_f)
-        @instance = snapshot["instances"].first
+        snapshot.save
+        saved_snapshot = ::Yajl::Parser.parse(File.read(snapshot.path))
+        saved_snapshot["time"].should be_within(1.0).of(Time.now.to_f)
+        @instance = saved_snapshot["instances"].first
       end
 
       it "has a snapshot with expected attributes so loggregator can process the json correctly" do
@@ -123,8 +123,8 @@ describe "snapshot" do
 
   describe "load" do
     before do
-      File.open(bootstrap.snapshot_path, "w") do |file|
-        snapshot = {
+      File.open(snapshot.path, "w") do |file|
+        saved_snapshot = {
           "instances" => [
             {
               "k1" => "v1",
@@ -139,7 +139,7 @@ describe "snapshot" do
           ],
         }
 
-        file.write(::Yajl::Encoder.encode(snapshot))
+        file.write(::Yajl::Encoder.encode(saved_snapshot))
       end
     end
 
@@ -158,7 +158,7 @@ describe "snapshot" do
           ordered.
           with("abc")
 
-        bootstrap.should_receive(:create_instance) do |attr|
+        instance_manager.should_receive(:create_instance) do |attr|
           attr.should_not include("state")
 
           # Return mock instance
@@ -166,17 +166,7 @@ describe "snapshot" do
         end
       end
 
-      bootstrap.load_snapshot
-    end
-
-    it "loads the snapshot on startup" do
-      bootstrap.should_receive(:load_snapshot)
-
-      em do
-        bootstrap.setup
-        bootstrap.start
-        EM.stop
-      end
+      snapshot.load
     end
   end
 end

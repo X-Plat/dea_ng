@@ -30,8 +30,10 @@ require "dea/staging/staging_task_registry"
 require "dea/staging/staging_task"
 
 require "dea/starting/instance"
+require "dea/starting/instance_manager"
 require "dea/starting/instance_registry"
 
+require "dea/snapshot"
 
 Dir[File.join(File.dirname(__FILE__), "responders/*.rb")].each { |f| require(f) }
 
@@ -45,7 +47,6 @@ module Dea
     DISCOVER_DELAY_MS_MAX = 250
 
     EXIT_REASON_STOPPED = "STOPPED"
-    EXIT_REASON_CRASHED = "CRASHED"
     EXIT_REASON_SHUTDOWN = "DEA_SHUTDOWN"
     EXIT_REASON_EVACUATION = "DEA_EVACUATION"
 
@@ -79,6 +80,8 @@ module Dea
       setup_droplet_registry
       setup_instance_registry
       setup_staging_task_registry
+      setup_instance_manager
+      setup_snapshot
       setup_resource_manager
       setup_directory_server
       setup_directory_server_v2
@@ -142,6 +145,12 @@ module Dea
       @instance_registry = Dea::InstanceRegistry.new(config)
     end
 
+    attr_reader :instance_manager
+
+    def setup_instance_manager
+      @instance_manager = Dea::InstanceManager.new(self)
+    end
+
     attr_reader :resource_manager
 
     def setup_resource_manager
@@ -154,6 +163,12 @@ module Dea
 
     def setup_staging_task_registry
       @staging_task_registry = Dea::StagingTaskRegistry.new
+    end
+
+    attr_reader :snapshot
+
+    def setup_snapshot
+      @snapshot = Dea::Snapshot.new(staging_task_registry, instance_registry, config["base_dir"], instance_manager)
     end
 
     attr_reader :router_client
@@ -256,7 +271,7 @@ module Dea
     def setup_sweepers
       # Heartbeats of instances we're managing
       hb_interval = config["intervals"]["heartbeat"] || DEFAULT_HEARTBEAT_INTERVAL
-      @heartbeat_timer = EM.add_periodic_timer(hb_interval) { send_heartbeat(instance_registry.to_a) }
+      @heartbeat_timer = EM.add_periodic_timer(hb_interval) { send_heartbeat() }
 
       # Ensure we keep around only the most recent crash for short amount of time
       instance_registry.start_reaper
@@ -331,7 +346,7 @@ module Dea
 
       unless instance_registry.empty?
         logger.info("Loaded #{instance_registry.size} instances from snapshot")
-        send_heartbeat(instance_registry.to_a)
+        send_heartbeat()
       end
     end
 
@@ -352,7 +367,7 @@ module Dea
     end
 
     def start
-      load_snapshot
+      snapshot.load
 
       start_component
       start_nats
@@ -371,66 +386,6 @@ module Dea
       end
     end
 
-    def snapshot_path
-      File.join(config["base_dir"], "db", "instances.json")
-    end
-
-    def save_snapshot
-      start = Time.now
-
-      instances = instance_registry.select do |i|
-        [
-          Dea::Instance::State::RUNNING,
-          Dea::Instance::State::CRASHED,
-        ].include?(i.state)
-      end
-
-      snapshot = {
-        "time"      => start.to_f,
-        "instances" => instances.map(&:snapshot_attributes),
-        "staging_tasks" => staging_task_registry.map { |staging_task| staging_task.staging_message.to_hash }
-      }
-
-      file = Tempfile.new("instances", File.join(config["base_dir"], "tmp"))
-      file.write(::Yajl::Encoder.encode(snapshot, :pretty => true))
-      file.close
-
-      FileUtils.mv(file.path, snapshot_path)
-
-      logger.debug("Saving snapshot took: %.3fs" % [Time.now - start])
-    end
-
-    def load_snapshot
-      return unless File.exist?(snapshot_path)
-
-      start = Time.now
-
-      snapshot = ::Yajl::Parser.parse(File.read(snapshot_path))
-      snapshot ||= {}
-
-      if snapshot["instances"]
-        snapshot["instances"].each do |attributes|
-          instance_state = attributes.delete("state")
-          instance = create_instance(attributes)
-          next unless instance
-
-          # Ignore instance if it doesn't validate
-          begin
-            instance.validate
-          rescue => error
-            logger.warn("Error validating instance: #{error.message}")
-            next
-          end
-
-          # Enter instance state via "RESUMING" to trigger the right transitions
-          instance.state = Instance::State::RESUMING
-          instance.state = instance_state
-        end
-
-        logger.debug("Loading snapshot took: %.3fs" % [Time.now - start])
-      end
-    end
-
     def reap_unreferenced_droplets
       instance_registry_shas = Set.new(instance_registry.map(&:droplet_sha1))
       staging_registry_shas = Set.new(staging_task_registry.map(&:droplet_sha1))
@@ -444,84 +399,8 @@ module Dea
       end
     end
 
-    def create_instance(attributes)
-      instance = Instance.new(self, attributes)
-
-      begin
-        instance.validate
-      rescue => error
-        logger.warn "Error validating instance: #{error.message}"
-        return
-      end
-
-      instance.on(Instance::Transition.new(:born, :crashed)) do
-        send_exited_message(instance, EXIT_REASON_CRASHED)
-      end
-
-      unless resource_manager.could_reserve?(attributes["limits"]["mem"], attributes["limits"]["disk"])
-        constrained_resource = resource_manager.get_constrained_resource(attributes["limits"]["mem"],
-                                                  attributes["limits"]["disk"])
-        logger.error "instance.start.insufficient-resource",
-                     :app => instance.attributes["application_id"],
-                     :instance => instance.attributes["instance_index"],
-                     :constrained_resource => constrained_resource
-
-        instance.exit_description = "Not enough #{constrained_resource} resource available."
-        instance.state = Instance::State::CRASHED
-        return nil
-      end
-
-      instance.setup
-
-      instance.on(Instance::Transition.new(:starting, :crashed)) do
-        send_exited_message(instance, EXIT_REASON_CRASHED)
-      end
-
-      instance.on(Instance::Transition.new(:starting, :running)) do
-        # Notify others immediately
-        send_heartbeat([instance])
-
-        # Register with router
-        router_client.register_instance(instance)
-      end
-
-      instance.on(Instance::Transition.new(:running, :crashed)) do
-        router_client.unregister_instance(instance)
-        send_exited_message(instance, EXIT_REASON_CRASHED)
-      end
-
-      instance.on(Instance::Transition.new(:running, :stopping)) do
-        router_client.unregister_instance(instance)
-        send_instance_stop_message(instance)
-      end
-
-      instance.on(Instance::Transition.new(:starting, :stopping)) do
-        send_instance_stop_message(instance)
-      end
-
-      instance.on(Instance::Transition.new(:starting, :running)) do
-        save_snapshot
-      end
-
-      instance.on(Instance::Transition.new(:running, :stopping)) do
-        save_snapshot
-      end
-
-      instance.on(Instance::Transition.new(:running, :crashed)) do
-        save_snapshot
-      end
-
-      instance.on(Instance::Transition.new(:stopping, :stopped)) do
-        @instance_registry.unregister(instance)
-        EM.next_tick { instance.destroy }
-      end
-
-      instance_registry.register(instance)
-      instance
-    end
-
     def handle_health_manager_start(message)
-      send_heartbeat(instance_registry.to_a)
+      send_heartbeat()
     end
 
     def handle_router_start(message)
@@ -555,14 +434,14 @@ module Dea
     end
 
     def start_app(data)
-      instance = create_instance(data)
+      instance = instance_manager.create_instance(data)
       return unless instance
 
       instance.start
     end
 
     def handle_dea_stop(message)
-      instances_filtered_by_message(message) do |instance|
+      instance_registry.instances_filtered_by_message(message) do |instance|
         next unless instance.running? || instance.starting?
 
         instance.stop do |error|
@@ -602,7 +481,7 @@ module Dea
     end
 
     def handle_dea_find_droplet(message)
-      instances_filtered_by_message(message) do |instance|
+      instance_registry.instances_filtered_by_message(message) do |instance|
         response = Dea::Protocol::V1::FindDropletResponse.generate(self,
           instance,
           message.data)
@@ -732,13 +611,9 @@ module Dea
       nil
     end
 
-    def send_heartbeat(instances)
-      instances = instances.select do |instance|
-        match = false
-        match ||= instance.starting?
-        match ||= instance.running?
-        match ||= instance.crashed?
-        match
+    def send_heartbeat()
+      instances = instance_registry.to_a.select do |instance|
+        instance.starting? || instance.running? || instance.crashed?
       end
 
       return if instances.empty?
@@ -747,46 +622,6 @@ module Dea
       nats.publish("dea.heartbeat", hbs)
 
       nil
-    end
-
-    def instances_filtered_by_message(message)
-      app_id = message.data["droplet"].to_s
-
-      if app_id
-        logger.debug2("Filter message for app_id: %s" % app_id, :app_id => app_id)
-      else
-        logger.warn("Filter message missing app_id")
-        return
-      end
-
-      instances = instance_registry.instances_for_application(app_id)
-      if instances.empty?
-        logger.debug2("No instances found for app_id: %s" % app_id, :app_id => app_id)
-        return
-      end
-
-      set_or_nil = lambda { |h, k| h.has_key?(k) ? Set.new(h[k]) : nil }
-
-      # Optional search filters
-      version = message.data["version"]
-      instance_ids = set_or_nil.call(message.data, "instances")
-      instance_ids ||= set_or_nil.call(message.data, "instance_ids")
-      indices = set_or_nil.call(message.data, "indices")
-      states = set_or_nil.call(message.data, "states")
-      states = states.map { |e| Dea::Instance::State.from_external(e) } unless states.nil?
-
-      instances.each do |_, instance|
-        matched = true
-
-        matched &&= (instance.application_version == version) unless version.nil?
-        matched &&= instance_ids.include?(instance.instance_id) unless instance_ids.nil?
-        matched &&= indices.include?(instance.instance_index) unless indices.nil?
-        matched &&= states.include?(instance.state) unless states.nil?
-
-        if matched
-          yield(instance)
-        end
-      end
     end
 
     def periodic_varz_update

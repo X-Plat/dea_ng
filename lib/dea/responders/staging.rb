@@ -58,11 +58,10 @@ module Dea::Responders
 
       staging_task_registry.register(task)
 
-      bootstrap.save_snapshot
+      bootstrap.snapshot.save
 
       notify_setup_completion(response, task)
-      notify_completion(message, task)
-      notify_upload(response, task)
+      notify_completion(response, task)
       notify_stop(response, task)
 
       task.start
@@ -123,18 +122,8 @@ module Dea::Responders
       end
     end
 
-    def notify_completion(message, task)
+    def notify_completion(response, task)
       task.after_complete_callback do |error|
-        if message.start_message && !error
-          start_message = message.start_message.to_hash
-          start_message["sha1"] = task.droplet_sha1
-          bootstrap.start_app(start_message)
-        end
-      end
-    end
-
-    def notify_upload(response, task)
-      task.after_upload_callback do |error|
         respond_to_response(response, {
           :task_id => task.task_id,
           :error => (error.to_s if error),
@@ -144,7 +133,13 @@ module Dea::Responders
 
         staging_task_registry.unregister(task)
 
-        bootstrap.save_snapshot
+        bootstrap.snapshot.save
+
+        if task.staging_message.start_message && !error
+          start_message = task.staging_message.start_message.to_hash
+          start_message["sha1"] = task.droplet_sha1
+          bootstrap.start_app(start_message)
+        end
       end
     end
 
@@ -157,7 +152,7 @@ module Dea::Responders
 
         staging_task_registry.unregister(task)
 
-        bootstrap.save_snapshot
+        bootstrap.snapshot.save
       end
     end
 
