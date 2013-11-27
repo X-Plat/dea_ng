@@ -1,8 +1,7 @@
 language: ruby
 
 rvm:
-  - 1.9.3-p448
-  - 1.9.3
+  - 1.9.3-p484
 
 before_install:
   - git submodule update --init --recursive
@@ -10,4 +9,4 @@ before_install:
 before_script:
   - gvm use go1.1
 
-script: "bin/test"
+script: bin/test
