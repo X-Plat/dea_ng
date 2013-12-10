@@ -9,7 +9,7 @@ module Dea
       "status"    => {},
       "resources" => {},
       "crash_lifetime_secs" => 60 * 60,
-      "evacuation_bail_out_time_in_seconds" => 900,
+      "evacuation_bail_out_time_in_seconds" => 60*6,
       "bind_mounts" => [],
       "crash_block_usage_ratio_threshold" => 0.8,
       "crash_inode_usage_ratio_threshold" => 0.8,
@@ -33,7 +33,6 @@ module Dea
 
           "directory_server" => {
             "protocol" => String,
-            "v1_port" => Integer,
             "v2_port" => Integer,
             "file_api_port" => Integer,
           },
