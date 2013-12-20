@@ -715,7 +715,7 @@ module Dea
 
           hc.errback  { p.deliver(false) }
 
-          hc.timeout(max_healthcheck_timeout)
+          hc.timeout(health_check_timeout)
         end
       end
     end
@@ -814,6 +814,7 @@ module Dea
 
         "warden_handle"         => attributes["warden_handle"],
         "limits"                => attributes["limits"],
+        "health_check_timeout"  => attributes["health_check_timeout"],
 
         "environment"           => attributes["environment"],
         "services"              => attributes["services"],
@@ -878,8 +879,16 @@ module Dea
       File.join(root, "tmp", "rootfs", "home", "vcap", *parts)
     end
 
-    def max_healthcheck_timeout
-      config["maximum_health_check_timeout"] || 60
+    def health_check_timeout
+      app_specific_health_check_timeout || default_health_check_timeout
+    end
+
+    def app_specific_health_check_timeout
+      attributes["health_check_timeout"]
+    end
+
+    def default_health_check_timeout
+      config["default_health_check_timeout"]
     end
 
     def logger
