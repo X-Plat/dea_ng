@@ -283,7 +283,9 @@ module Dea
     end
 
     def app_workspace_user
-      @app_user ? @app_user : DEFAULT_APPWORKSPACE_USER
+      @attributes['app_workspace_user'] || \
+      @app_user || \
+      DEFAULT_APPWORKSPACE_USER
     end
 
     def memory_limit_in_bytes
@@ -430,8 +432,6 @@ module Dea
           promise_warden_call(:app, request).resolve
         end
 
-        parse_droplet_metadata
-
         raw_ports = attributes['instance_meta']['raw_ports']
         if raw_ports
           prod_ports = {}
@@ -519,6 +519,7 @@ module Dea
         info = container.info
         manifest_path = info.container_path
         @attributes['instance_meta'] = promise_read_instance_manifest(manifest_path).resolve || {}
+        @attributes['app_workspace_user'] ||= @attributes['instance_meta'].fetch('app_workspace', {}).fetch('user', DEFAULT_APPWORKSPACE_USER)
         if ( config['enable_sshd'] == true )
           @attributes['instance_meta']['raw_ports'] = {} if !@attributes['instance_meta']['raw_ports']
           log(:warn, "ignore user defined sshd port") if @attributes['instance_meta']['raw_ports']['sshd']
@@ -642,6 +643,7 @@ module Dea
       Promise.new do |p|
         promise_create_container.resolve
         #promise_setup_network.resolve
+        parse_droplet_metadata
         promise_limit_disk.resolve
         promise_limit_memory.resolve
         promise_setup_environment.resolve
