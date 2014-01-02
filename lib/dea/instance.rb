@@ -557,7 +557,6 @@ module Dea
 
         request.rlimits = ::Warden::Protocol::ResourceLimits.new
         request.rlimits.nofile = self.file_descriptor_limit
-        request.rlimits.nproc = 512
 
         response = promise_warden_call(:app, request).resolve
 
