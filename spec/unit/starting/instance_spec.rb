@@ -304,8 +304,8 @@ describe Dea::Instance do
 
   describe "attributes_and_stats from stat collector" do
     it "returns the used_memory_in_bytes stat in the attributes_and_stats hash" do
-      instance.stat_collector.stub(:used_memory_in_bytes).and_return(28 * 1024)
-      instance.attributes_and_stats.should include("used_memory_in_bytes" => 28)
+      instance.stat_collector.stub(:used_memory_in_bytes).and_return(999)
+      instance.attributes_and_stats.should include("used_memory_in_bytes" => 999)
     end
 
     it "returns the used_disk_in_bytes stat in the attributes_and_stats hash" do
@@ -427,9 +427,16 @@ describe Dea::Instance do
     end
 
     describe "when the application has URIs" do
+      let(:application_id) { 37 }
+
       before do
+        instance.attributes["application_id"] = application_id
         instance.attributes["application_uris"] = ["some-test-app.my-cloudfoundry.com"]
+        instance.attributes["instance_index"] = 2
         Dea::HealthCheck::PortOpen.stub(:new).and_yield(deferrable)
+
+        @emitter = FakeEmitter.new
+        Dea::Loggregator.emitter = @emitter
       end
 
       it "succeeds when the port is open" do
@@ -446,6 +453,13 @@ describe Dea::Instance do
         end
 
         result.should be_false
+      end
+
+      it "logs a message to loggregator when the port is not open" do
+        execute_health_check do
+          deferrable.fail
+        end
+        expect(@emitter.messages[application_id][0]).to eql("Instance (index 2) failed to start accepting connections")
       end
     end
 

@@ -713,7 +713,10 @@ module Dea
         @health_check = Dea::HealthCheck::PortOpen.new(host, port) do |hc|
           hc.callback { p.deliver(true) }
 
-          hc.errback  { p.deliver(false) }
+          hc.errback do
+            Dea::Loggregator.emit(application_id, "Instance (index #{instance_index}) failed to start accepting connections")
+            p.deliver(false)
+          end
 
           hc.timeout(health_check_timeout)
         end
@@ -769,7 +772,7 @@ module Dea
 
     def attributes_and_stats
       @attributes.merge({
-          "used_memory_in_bytes" => used_memory_in_bytes / 1024,
+          "used_memory_in_bytes" => used_memory_in_bytes,
           "used_disk_in_bytes" => used_disk_in_bytes,
           "computed_pcpu" => computed_pcpu
       })
