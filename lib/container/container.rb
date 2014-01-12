@@ -24,7 +24,6 @@ class Container
     @network_ports = {}
   end
 
-  #API: GETSTATE (returns the warden's state file)
   def update_path_and_ip
     raise ArgumentError, 'container handle must not be nil' unless @handle
 
@@ -38,7 +37,6 @@ class Container
     response
   end
 
-  #API: within CREATE
   def get_new_warden_net_in
     request = ::Warden::Protocol::NetInRequest.new
     request.handle = handle
@@ -63,8 +61,6 @@ class Container
 
   end
 
-  #API: within DESTROY
-  # what do we do with link requests
   def call_with_retry(name, request)
     count = 0
     response = nil
@@ -84,7 +80,6 @@ class Container
     response
   end
 
-  #API: RUNSCRIPT
   def run_script(name, script, privileged=false, discard_output=false, log_tag=nil)
     request = ::Warden::Protocol::RunRequest.new
     request.handle = handle
@@ -108,21 +103,24 @@ class Container
     end
   end
 
-  #API: SPAWN
-  def spawn(script, file_descriptor_limit, nproc_limit, discard_output=false, log_tag=nil)
-    request = ::Warden::Protocol::SpawnRequest.new
-    request.handle = handle
-    request.rlimits = ::Warden::Protocol::ResourceLimits.new
-    request.rlimits.nproc = nproc_limit
-    request.rlimits.nofile = file_descriptor_limit
-    request.script = script
-    request.discard_output = discard_output
-    request.log_tag = log_tag
+  def spawn(script, resource_limits = nil)
+    request =
+      ::Warden::Protocol::SpawnRequest.new(handle: handle,
+                                           script: script,
+                                           discard_output: true)
+
+    request.rlimits = resource_limits if resource_limits
+
     response = call(:app, request)
+
     response
   end
 
-  #API: DESTROY
+  def resource_limits(file_descriptor_limit, process_limit)
+    ::Warden::Protocol::ResourceLimits.new(nofile: file_descriptor_limit,
+                                           nproc: process_limit)
+  end
+
   def destroy!
     with_em do
       request = ::Warden::Protocol::DestroyRequest.new
@@ -166,7 +164,6 @@ class Container
     end
   end
 
-  # HELPER for DESTROY
   def close_all_connections
     @client_provider.close_all
   end
@@ -183,14 +180,16 @@ class Container
     network_ports['console_container_port'] = response.container_port
   end
 
-  # HELPER
   def info
     request = ::Warden::Protocol::InfoRequest.new
     request.handle = @handle
     call(:app_info, request)
   end
 
-  # HELPER
+  def link(job_id)
+    call_with_retry(:link, ::Warden::Protocol::LinkRequest.new(handle: handle, job_id: job_id))
+  end
+
   def call(name, request)
     client(name).call(request)
   end

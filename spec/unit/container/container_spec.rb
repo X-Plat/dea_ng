@@ -192,27 +192,39 @@ describe Container do
   end
 
   describe '#spawn' do
-    let(:nproc_limit) { 123 }
-    let(:file_descriptor_limit) { 456 }
     let(:script) { './dostuffscript' }
-    let(:discard_output) { true }
-    let(:log_tag) { 'some-log-tag' }
 
     it 'executes a SpawnRequest' do
+      resource_limits = ::Warden::Protocol::ResourceLimits.new
+
       container.should_receive(:call) do |name, request|
         expect(name).to eq(:app)
         expect(request).to be_kind_of(::Warden::Protocol::SpawnRequest)
-        expect(request.handle).to eq(container.handle)
-        expect(request.rlimits.nproc).to eq(nproc_limit)
-        expect(request.rlimits.nofile).to eq(file_descriptor_limit)
         expect(request.script).to eq(script)
+        expect(request.handle).to eq(container.handle)
+        expect(request.rlimits).to eq(resource_limits)
         expect(request.discard_output).to be_true
-        expect(request.log_tag).to eq(log_tag)
 
         response
       end
 
-      result = container.spawn(script, file_descriptor_limit, nproc_limit, discard_output, log_tag)
+      result = container.spawn(script, resource_limits)
+
+      expect(result).to eq(response)
+    end
+
+    it 'allows resource_limits to be unspecified' do
+      container.should_receive(:call) do |name, request|
+        expect(name).to eq(:app)
+        expect(request).to be_kind_of(::Warden::Protocol::SpawnRequest)
+        expect(request.script).to eq(script)
+        expect(request.handle).to eq(container.handle)
+        expect(request.discard_output).to be_true
+
+        response
+      end
+
+      result = container.spawn(script)
 
       expect(result).to eq(response)
     end
@@ -332,6 +344,39 @@ describe Container do
 
       expect(container.handle).to_not eq(handle)
       container.new_container_with_bind_mounts(bind_mounts)
+    end
+  end
+
+  describe '#resource_limits' do
+    it 'returns a ::Warden::Protocol::ResourceLimits' do
+      expect(container.resource_limits(nil, nil)).to be_a_kind_of(::Warden::Protocol::ResourceLimits)
+    end
+
+    it 'sets nofile resource limit' do
+      file_descriptor_limit = 1999
+      expect(container.resource_limits(file_descriptor_limit, nil).nofile).to eq(1999)
+    end
+
+    it 'sets nproc resource limit'do
+      process_limit = 2001
+      expect(container.resource_limits(nil, process_limit).nproc).to eq(2001)
+    end
+  end
+
+  describe '#link' do
+    it 'calls #call_with_retry correctly' do
+      fake_response = instance_double(::Warden::Protocol::LinkResponse)
+
+      container.should_receive(:call_with_retry) do |name, request|
+        expect(name).to eq(:link)
+        expect(request).to be_an_instance_of(::Warden::Protocol::LinkRequest)
+        expect(request.handle).to eq(container.handle)
+        expect(request.job_id).to eq('FAKE_JOB_ID')
+
+        fake_response
+      end
+
+      expect(container.link('FAKE_JOB_ID')).to eq(fake_response)
     end
   end
 
