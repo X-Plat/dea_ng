@@ -192,22 +192,15 @@ module Dea
 
     def promise_stage
       Promise.new do |p|
-        env = Env.new(staging_message, self)
-
-        script = [
-          'set -o pipefail;',
-          env.exported_environment_variables,
-          config['dea_ruby'],
-          run_plugin_path,
-          workspace.plugin_config_path,
-          "| tee -a #{workspace.warden_staging_log}"
-        ].join(' ')
-
+        script = staging_command
         logger.debug 'staging.task.execute-staging', script: script
 
+        spawn_response = container.spawn(script)
+        @warden_job_id = spawn_response.job_id
+        bootstrap.snapshot.save
         begin
           Timeout.timeout(staging_timeout + staging_timeout_grace_period) do
-            loggregator_emit_result container.run_script(:app, script)
+            loggregator_emit_result(container.link_or_raise(@warden_job_id))
           end
           p.deliver
         rescue Container::WardenError => staging_error
@@ -499,7 +492,35 @@ module Dea
       end + config['bind_mounts']
     end
 
+    def snapshot_attributes
+      logger.info 'snapshot_attributes', properties: staging_message.properties
+      {
+        'staging_message' => staging_message.to_hash,
+        'warden_container_path' => container.path,
+        'warden_job_id' => @warden_job_id,
+        'syslog_drain_urls' => syslog_drain_urls,
+      }
+    end
+
     private
+
+    def staging_command
+      env = Env.new(staging_message, self)
+
+      [
+        'set -o pipefail;',
+        env.exported_environment_variables,
+        config['dea_ruby'],
+        run_plugin_path,
+        workspace.plugin_config_path,
+        "| tee -a #{workspace.warden_staging_log}"
+      ].join(' ')
+    end
+
+    def syslog_drain_urls
+      services = staging_message.properties['services'] || []
+      services.map { |svc_hash| svc_hash['syslog_drain_url'] }.compact
+    end
 
     def resolve_staging_setup
       workspace.prepare
