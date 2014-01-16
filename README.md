@@ -58,7 +58,7 @@ The following is a partial list of the keys that are read from the YAML file:
 ### Running the DEA in the provided Vagrant VM
 
 When contributing to DEA it's useful to run it as a standalone
-component. This test configuration uses [Vagrant 1.1x][vagrant].
+component. This test configuration uses [Vagrant >=1.1][vagrant].
 
 [vagrant]: http://docs.vagrantup.com/v2/installation/index.html
 
@@ -68,6 +68,7 @@ Follow these steps to set up DEA to run locally on your computer:
 # clone the repo
 cd ~/workspace
 git clone http://github.com/cloudfoundry/dea_ng
+cd dea_ng
 git submodule update --init
 bundle install
 
