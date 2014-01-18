@@ -31,6 +31,7 @@ require "dea/staging/staging_task_registry"
 require "dea/staging/staging_task"
 
 require "dea/starting/instance"
+require "dea/starting/instance_uri_updater"
 require "dea/starting/instance_manager"
 require "dea/starting/instance_registry"
 
@@ -377,23 +378,8 @@ module Dea
       app_version = message.data["version"]
 
       instance_registry.instances_for_application(app_id).dup.each do |_, instance|
-        current_uris = instance.application_uris
-
-        logger.debug("Mapping new URIs")
-        logger.debug("New: #{uris} Old: #{current_uris}")
-
-        new_uris = uris - current_uris
-        unless new_uris.empty?
-          router_client.register_instance(instance, :uris => new_uris)
-        end
-
-        obsolete_uris = current_uris - uris
-        unless obsolete_uris.empty?
-          router_client.unregister_instance(instance, :uris => obsolete_uris)
-        end
-
-        instance.application_uris = uris
-
+        next unless instance.running? || instance.evacuating?
+        InstanceUriUpdater.new(instance, uris).update(router_client)
         if app_version
           instance.application_version = app_version
           instance_registry.change_instance_id(instance)
