@@ -4,6 +4,9 @@ require "membrane"
 
 module Dea
   class Config
+    DEFAULT_STAGING_DISK_INODE_LIMIT = 200_000
+    DEFAULT_INSTANCE_DISK_INODE_LIMIT = 200_000
+
     EMPTY_CONFIG = {
       "intervals" => {},
       "status" => {},
@@ -14,8 +17,14 @@ module Dea
       "crash_block_usage_ratio_threshold" => 0.8,
       "crash_inode_usage_ratio_threshold" => 0.8,
       "placement_properties" => { "zone" => "default" },
-      "instance" => { "cpu_limit_shares" => 256 },
-      "staging" => { "cpu_limit_shares" => 512 },
+      "instance" => {
+        "cpu_limit_shares" => 256,
+        "disk_inode_limit" => DEFAULT_INSTANCE_DISK_INODE_LIMIT,
+      },
+      "staging" => {
+        "cpu_limit_shares" => 512,
+        "disk_inode_limit" => DEFAULT_STAGING_DISK_INODE_LIMIT,
+      },
       "default_health_check_timeout" => 60
     }
 
@@ -88,12 +97,16 @@ module Dea
 
           optional("instance") => {
             optional("cpu_limit_shares") => Integer,
+            optional("disk_inode_limit") => Integer
           },
 
           optional("staging") => {
             optional("enabled") => bool,
             optional("max_staging_duration") => Integer,
-            optional("environment") => Hash
+            optional("environment") => Hash,
+            optional("memory_limit_mb") => Integer,
+            optional("disk_limit_mb") => Integer,
+            optional("cpu_limit_shares") => Integer
           }
         }
       end
@@ -143,6 +156,14 @@ module Dea
 
     def minimum_staging_disk_mb
       @config.fetch("staging", {}).fetch("disk_limit_mb", 2*1024)
+    end
+
+    def staging_disk_inode_limit
+      @config.fetch("staging", {}).fetch("disk_inode_limit", DEFAULT_STAGING_DISK_INODE_LIMIT)
+    end
+
+    def instance_disk_inode_limit
+      @config.fetch("instance", {}).fetch("disk_inode_limit", DEFAULT_INSTANCE_DISK_INODE_LIMIT)
     end
   end
 end

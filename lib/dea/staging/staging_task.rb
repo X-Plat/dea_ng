@@ -121,6 +121,10 @@ module Dea
       disk_limit_mb * 1024 * 1024
     end
 
+    def disk_inode_limit
+      config.staging_disk_inode_limit
+    end
+
     def stop(&callback)
       stopping_promise = Promise.new do |p|
         logger.info 'staging.task.stopped'
@@ -524,11 +528,14 @@ module Dea
     def resolve_staging_setup
       workspace.prepare
       with_network = false
-      container.create_container(bind_mounts,
-        staging_config['cpu_limit_shares'],
-        disk_limit_in_bytes,
-        memory_limit_in_bytes,
-        with_network)
+      container.create_container(
+        bind_mounts: bind_mounts,
+        limit_cpu: staging_config['cpu_limit_shares'],
+        byte: disk_limit_in_bytes,
+        inode: disk_inode_limit,
+        limit_memory: memory_limit_in_bytes,
+        setup_network: with_network
+      )
       promises = [promise_app_download]
       promises << promise_buildpack_cache_download if staging_message.buildpack_cache_download_uri
 

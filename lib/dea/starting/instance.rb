@@ -112,6 +112,27 @@ module Dea
       end
     end
 
+    class AttributesLoggingFilter
+      FILTER = %w[services environment droplet_uri]
+
+      def initialize(attributes)
+        @attributes = attributes
+      end
+
+      def to_hash
+        attributes = @attributes.dup
+        attributes.delete_if do |key,value|
+          FILTER.include?(key)
+        end
+
+        attributes
+      end
+
+      def to_json
+        to_hash.to_json
+      end
+    end
+
     def self.translate_attributes(attributes)
       attributes = attributes.dup
 
@@ -255,7 +276,7 @@ module Dea
       @exit_status = -1
       @exit_description = ''
 
-      logger.user_data[:attributes] = @attributes
+      logger.user_data[:attributes] = AttributesLoggingFilter.new(@attributes)
 
       setup_container_from_snapshot
     end
@@ -494,11 +515,12 @@ module Dea
         bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_dirname}]
         with_network = true
         container.create_container(
-          bind_mounts + config['bind_mounts'],
-          config['instance']['cpu_limit_shares'],
-          disk_limit_in_bytes,
-          memory_limit_in_bytes,
-          with_network)
+          bind_mounts: bind_mounts + config['bind_mounts'],
+          limit_cpu: config['instance']['cpu_limit_shares'],
+          byte: disk_limit_in_bytes,
+          inode: config.instance_disk_inode_limit,
+          limit_memory: memory_limit_in_bytes,
+          setup_network: with_network)
 
         attributes['warden_handle'] = container.handle
 
