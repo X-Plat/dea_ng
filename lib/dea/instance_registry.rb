@@ -91,9 +91,21 @@ module Dea
       @instances_by_app_id.each.with_object({}) do |(app_id, instances), hash|
         hash[app_id] =
           instances.each.with_object({}) do |(id, instance), is|
-            is[id] = instance.attributes
+            ins_snapshot = instance.attributes
+            ins_snapshot.merge!(resource_usage(instance))
+            is[id] = ins_snapshot
           end
       end
+    end
+
+    def resource_usage(instance)
+      {
+        :usage => {
+          :cpu => instance.computed_pcpu,
+          :mem => instance.used_memory_in_bytes / 1024,
+          :disk => instance.used_disk_in_bytes
+        }
+      }
     end
 
     def app_id_to_count
