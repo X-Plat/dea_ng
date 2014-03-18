@@ -173,7 +173,57 @@ class Container
     @client_provider.close_all
   end
 
-  def setup_network
+  def setup_network(param={})
+    attributes =  param.dup
+     
+    net_in = lambda do |container_port|
+      request = ::Warden::Protocol::NetInRequest.new
+      request.handle = attributes["warden_handle"]
+      request.container_port = container_port
+      promise_warden_call(:app, request).resolve
+    end
+    raw_ports = attributes['instance_meta']['raw_ports']
+     if raw_ports
+          prod_ports = {}
+          attributes['instance_meta']['prod_ports'] = {}
+          raw_ports.each_pair do |name, info|
+            response = net_in.call(info['port'])
+            prod_ports[name] = {
+              'host_port'=> response.host_port,
+              'container_port' => response.container_port,
+              'port_info' => info
+            }
+            if "true" == info['http'].to_s
+              attributes["instance_host_port"] = response.host_port
+              attributes["instance_container_port"] = response.container_port
+            end
+          end
+          attributes['instance_meta']['prod_ports'] = prod_ports
+
+        end
+
+        unless attributes["instance_host_port"]
+          response = net_in.call(nil)
+          attributes["instance_host_port"]      = response.host_port
+          attributes["instance_container_port"] = response.container_port
+        end
+
+        response = net_in.call(nil)
+        attributes["instance_console_host_port"]      = response.host_port
+        attributes["instance_console_container_port"] = response.container_port
+
+        response = net_in.call(nil)
+        attributes["noah_monitor_host_port"]      = response.host_port
+        attributes["noah_monitor_container_port"] = response.container_port
+
+        if attributes["debug"]
+          response = net_in.call(nil)
+          attributes["instance_debug_host_port"]      = response.host_port
+          attributes["instance_debug_container_port"] = response.container_port
+        end
+  attributes
+    
+=begin    
     request = ::Warden::Protocol::NetInRequest.new(handle: handle)
     response = call(:app, request)
     network_ports['host_port'] = response.host_port
@@ -183,6 +233,7 @@ class Container
     response = call(:app, request)
     network_ports['console_host_port'] = response.host_port
     network_ports['console_container_port'] = response.container_port
+=end
   end
 
   def info

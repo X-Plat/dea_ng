@@ -411,6 +411,23 @@ module Dea
       end
     end
 
+
+    def parse_droplet_metadata()
+      begin
+        info = container.info
+        manifest_path = info.container_path
+        @attributes['instance_meta'] = promise_read_instance_manifest(manifest_path).resolve || {}
+        if ( config['enable_sshd'] == true )
+          @attributes['instance_meta']['raw_ports'] = {} if !@attributes['instance_meta']['raw_ports']
+          log(:warn, "ignore user defined sshd port") if @attributes['instance_meta']['raw_ports']['sshd']
+	  @attributes['instance_meta']['raw_ports']['sshd']={'port' => 22, 'http' => false, 'bns' => true} 
+        end
+      rescue => e
+        log(:warn, "parse droplet metadata failed with exception #{e}")
+        @attributes['instance_meta'] = {}
+      end
+    end
+
     def promise_start
       Promise.new do |p|
         env = Env.new(StartMessage.new(@raw_attributes), self)
@@ -478,6 +495,7 @@ module Dea
 
         [
           promise_extract_droplet,
+          promise_setup_network,
           promise_exec_hook_script('before_start'),
           promise_start
         ].each(&:resolve)
@@ -516,7 +534,7 @@ module Dea
     def promise_container
       Promise.new do |p|
         bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_dirname}]
-        with_network = true
+        with_network = false
         container.create_container(
           bind_mounts: bind_mounts + config['bind_mounts'],
           limit_cpu: config['instance']['cpu_limit_shares'],
@@ -529,6 +547,13 @@ module Dea
 
         promise_setup_environment.resolve
         p.deliver
+      end
+    end
+    def promise_setup_network
+      Promise.new do |p|
+        parse_droplet_metadata
+      	attributes = container.setup_network(attributes)
+      	p.deliver 
       end
     end
 
@@ -665,6 +690,13 @@ module Dea
         p.deliver(container.link(attributes['warden_job_id']))
       end
     end
+
+    def link(&callback)
+      Promise.resolve(promise_link) do |error, link_response|
+        if error
+          logger.warn('droplet.warden.link.failed', error: error, backtrace: error.backtrace)
+
+          self.exit_status = -1
 
     def link(&callback)
       Promise.resolve(promise_link) do |error, link_response|
@@ -902,13 +934,6 @@ module Dea
     def default_health_check_timeout
       config['default_health_check_timeout']
     end
-
-    def logger
-      tags = {
-        'instance_id' => instance_id,
-        'instance_index' => instance_index,
-        'application_id' => application_id,
-        'application_version' => application_version,
         'application_name' => application_name,
       }
 
