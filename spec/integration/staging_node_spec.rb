@@ -78,11 +78,6 @@ describe "Staging a node app", :type => :integration, :requires_warden => true d
     end
 
     it "passes (for the most part, but fails intermittently)" do
-      # There appears to be an existing problem with Heroku's tests for this buildpack
-      # where different tests will fail intermittently. We've seen these pass several times
-      # in a row now and are avoiding making changes to the buildpack so we're going to live
-      # with this for now.
-
       _, log = perform_stage_request(staging_message)
 
       expect(log).to include "Running bin/test"

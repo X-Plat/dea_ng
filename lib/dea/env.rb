@@ -5,10 +5,13 @@ require "steno/core_ext"
 require "yajl"
 
 require "dea/staging/staging_task"
-require "dea/staging/staging_env"
 
 require "dea/starting/database_uri_generator"
-require "dea/starting/running_env"
+require "dea/staging/env"
+require "dea/starting/env"
+
+require "dea/env/exporter"
+require "dea/env/strategy_chooser"
 
 module Dea
   class Env
@@ -16,12 +19,9 @@ module Dea
 
     attr_reader :strategy_env
 
-    def initialize(message, instance_or_staging_task=nil)
-      @strategy_env = if message.is_a? StagingMessage
-        StagingEnv.new(message, instance_or_staging_task)
-      else
-        RunningEnv.new(message, instance_or_staging_task)
-      end
+    def initialize(message, instance_or_staging_task, env_exporter = Exporter, env_strategy_chooser = StrategyChooser.new(message, instance_or_staging_task))
+      @env_exporter = env_exporter
+      @strategy_env = env_strategy_chooser.strategy
     end
 
     def message
@@ -29,6 +29,24 @@ module Dea
     end
 
     def exported_system_environment_variables
+      to_export(system_environment_variables)
+    end
+
+    def exported_user_environment_variables
+      to_export(user_environment_variables)
+    end
+
+    def exported_environment_variables
+      to_export(system_environment_variables + user_environment_variables)
+    end
+
+    private
+
+    def user_environment_variables
+      translate_env(message.env)
+    end
+
+    def system_environment_variables
       env = [
         ["VCAP_APPLICATION",  Yajl::Encoder.encode(vcap_application)],
         ["VCAP_SERVICES",     Yajl::Encoder.encode(vcap_services)],
@@ -36,18 +54,8 @@ module Dea
       ]
       env << ["DATABASE_URL", DatabaseUriGenerator.new(message.services).database_uri] if message.services.any?
 
-      to_export(env + strategy_env.exported_system_environment_variables)
+      env + strategy_env.system_environment_variables
     end
-
-    def exported_user_environment_variables
-      to_export(translate_env(message.env))
-    end
-
-    def exported_environment_variables
-      exported_system_environment_variables + exported_user_environment_variables
-    end
-
-    private
 
     def vcap_services
       @vcap_services ||=
@@ -68,32 +76,15 @@ module Dea
     end
 
     def vcap_application
-      @vcap_application ||=
-        begin
-          hash = strategy_env.vcap_application
-
-          hash["limits"] = message.limits
-          hash["application_version"] = message.version
-          hash["application_name"] = message.name
-          hash["application_uris"] = message.uris
-          # Translate keys for backwards compatibility
-          hash["version"] = hash["application_version"]
-          hash["name"] = hash["application_name"]
-          hash["uris"] = hash["application_uris"]
-          hash["users"] = hash["application_users"]
-
-          hash
-        end
+      @vcap_application ||= message.vcap_application.merge(strategy_env.vcap_application)
     end
 
     def translate_env(env)
       env ? env.map { |e| e.split("=", 2) } : []
     end
 
-    def to_export(envs)
-      envs.map do |(key, value)|
-        %Q{export %s="%s";\n} % [key, value.to_s.gsub('"', '\"')]
-      end.join
+    def to_export(env)
+      @env_exporter.new(env).export
     end
   end
 end
