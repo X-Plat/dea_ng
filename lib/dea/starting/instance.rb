@@ -414,14 +414,8 @@ module Dea
 
     def parse_droplet_metadata()
       begin
-        info = container.info
-        manifest_path = info.container_path
+        manifest_path = container.info.container_path
         @attributes['instance_meta'] = promise_read_instance_manifest(manifest_path).resolve || {}
-        if ( config['enable_sshd'] == true )
-          @attributes['instance_meta']['raw_ports'] = {} if !@attributes['instance_meta']['raw_ports']
-          log(:warn, "ignore user defined sshd port") if @attributes['instance_meta']['raw_ports']['sshd']
-	  @attributes['instance_meta']['raw_ports']['sshd']={'port' => 22, 'http' => false, 'bns' => true} 
-        end
       rescue => e
         log(:warn, "parse droplet metadata failed with exception #{e}")
         @attributes['instance_meta'] = {}
