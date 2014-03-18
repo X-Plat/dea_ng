@@ -927,6 +927,7 @@ module Dea
     def default_health_check_timeout
       config['default_health_check_timeout']
     end
+
     def logger
       tags = {
         'instance_id' => instance_id,
@@ -936,6 +937,14 @@ module Dea
         'application_name' => application_name,
       }
       @logger ||= self.class.logger.tag(tags)
+    end
+
+    def log(level, message, data = {})
+      logger.send(level, message, base_log_data.merge(data))
+    end
+
+    def base_log_data
+      { :attributes => @attributes }
     end
   end
 end
