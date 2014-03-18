@@ -697,13 +697,6 @@ module Dea
           logger.warn('droplet.warden.link.failed', error: error, backtrace: error.backtrace)
 
           self.exit_status = -1
-
-    def link(&callback)
-      Promise.resolve(promise_link) do |error, link_response|
-        if error
-          logger.warn('droplet.warden.link.failed', error: error, backtrace: error.backtrace)
-
-          self.exit_status = -1
           self.exit_description = 'unknown'
         else
           description = determine_exit_description_from_link_response(link_response)
@@ -934,9 +927,14 @@ module Dea
     def default_health_check_timeout
       config['default_health_check_timeout']
     end
+    def logger
+      tags = {
+        'instance_id' => instance_id,
+        'instance_index' => instance_index,
+        'application_id' => application_id,
+        'application_version' => application_version,
         'application_name' => application_name,
       }
-
       @logger ||= self.class.logger.tag(tags)
     end
   end
