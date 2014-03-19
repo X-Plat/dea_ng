@@ -173,13 +173,14 @@ class Container
     @client_provider.close_all
   end
 
-  def setup_network(params={})
-    attributes =  params.dup  
+  def setup_network(params)
+    attributes = params.dup 
     net_in = lambda do |container_port|
       request = ::Warden::Protocol::NetInRequest.new
       request.handle = attributes["warden_handle"]
       request.container_port = container_port
-      promise_warden_call(:app, request).resolve
+      response = call(:app, request)
+      response
     end
     raw_ports = attributes['instance_meta']['raw_ports']
     if raw_ports
@@ -210,7 +211,7 @@ class Container
      response = net_in.call(nil)
      network_ports["console_host_port"]      = response.host_port
      network_ports["console_container_port"] = response.container_port
-
+     p attributes
      attributes
     
 =begin    

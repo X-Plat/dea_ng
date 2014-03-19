@@ -546,7 +546,7 @@ module Dea
     def promise_setup_network
       Promise.new do |p|
         parse_droplet_metadata
-      	attributes = container.setup_network(attributes)
+      	@attributes = container.setup_network(@attributes)
       	p.deliver 
       end
     end
