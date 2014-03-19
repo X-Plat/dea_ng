@@ -211,7 +211,6 @@ class Container
      response = net_in.call(nil)
      network_ports["console_host_port"]      = response.host_port
      network_ports["console_container_port"] = response.container_port
-     p attributes
      attributes
     
 =begin    
