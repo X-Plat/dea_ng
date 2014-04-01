@@ -10,12 +10,14 @@ require "container/warden_client_provider"
 
 module Dea
   class Task
-    class BaseError < StandardError; end
-    class NotImplemented < StandardError; end
+    class BaseError < StandardError;
+    end
+    class NotImplemented < StandardError;
+    end
 
     BIND_MOUNT_MODE_MAP = {
-      "ro" =>  ::Warden::Protocol::CreateRequest::BindMount::Mode::RO,
-      "rw" =>  ::Warden::Protocol::CreateRequest::BindMount::Mode::RW,
+      "ro" => ::Warden::Protocol::CreateRequest::BindMount::Mode::RO,
+      "rw" => ::Warden::Protocol::CreateRequest::BindMount::Mode::RW,
     }
 
     attr_reader :config
@@ -37,10 +39,9 @@ module Dea
       end
     end
 
-    def promise_stop
+    def promise_stop(kill_flag = false)
       Promise.new do |p|
-        request = ::Warden::Protocol::StopRequest.new
-        request.handle = container.handle
+        request = ::Warden::Protocol::StopRequest.new(handle: container.handle, kill: kill_flag)
         container.call(:stop, request)
 
         p.deliver
@@ -50,16 +51,14 @@ module Dea
     def promise_destroy
       Promise.new do |promise|
         if container.handle.nil?
-          logger.error "task.destroy.invalid"
+          logger.error("task.destroy.invalid")
         else
-          request = ::Warden::Protocol::DestroyRequest.new
-          request.handle = container.handle
+          request = ::Warden::Protocol::DestroyRequest.new(handle: container.handle)
 
           begin
             container.call_with_retry(:app, request)
           rescue ::EM::Warden::Client::Error => error
-            logger.warn "task.destroy.failed",
-              error: error, backtrace: error.backtrace
+            logger.warn("task.destroy.failed", error: error, backtrace: error.backtrace)
           end
 
           container.handle = nil
@@ -71,7 +70,7 @@ module Dea
 
     def destroy(&callback)
       promise = Promise.new do
-        logger.info "task.destroying"
+        logger.info("task.destroying")
         promise_destroy.resolve
         promise.deliver
       end
@@ -90,15 +89,11 @@ module Dea
         end
 
         if error
-          logger.warn "#{name}.failed with error #{error}",
-            duration: p.elapsed_time,
-            error: error,
-            backtrace: error.backtrace
+          logger.warn("#{name}.failed with error #{error}", duration: p.elapsed_time, error: error, backtrace: error.backtrace)
 
           p.fail(error)
         else
-          logger.warn "#{name}.completed",
-            duration: p.elapsed_time
+          logger.warn("#{name}.completed", duration: p.elapsed_time)
 
           p.deliver
         end
@@ -108,11 +103,10 @@ module Dea
     def copy_out_request(source_path, destination_path)
       FileUtils.mkdir_p(destination_path)
 
-      request = ::Warden::Protocol::CopyOutRequest.new
-      request.handle = container.handle
-      request.src_path = source_path
-      request.dst_path = destination_path
-      request.owner = Process.uid.to_s
+      request = ::Warden::Protocol::CopyOutRequest.new(handle: container.handle,
+                                                       src_path: source_path,
+                                                       dst_path: destination_path,
+                                                       owner: Process.uid.to_s)
 
       begin
         container.call_with_retry(:app, request)
