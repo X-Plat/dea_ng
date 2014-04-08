@@ -80,6 +80,13 @@ module Dea
     def workspace
       @workspace ||= StagingTaskWorkspace.new(
         config['base_dir'],
+        staging_message.properties
+      )
+    end
+
+    def buildpack_manager
+      @buildpack_manager ||= BuildpackManager.new(
+        workspace.admin_buildpacks_dir,
         staging_message,
         @buildpacks_in_use
       )
@@ -99,6 +106,14 @@ module Dea
 
     def detected_buildpack
       task_info['detected_buildpack']
+    end
+
+    def buildpack_path
+      task_info['buildpack_path']
+    end
+
+    def buildpack_key
+      staging_message.buildpack_key || buildpack_manager.buildpack_key(buildpack_path)
     end
 
     def memory_limit_mb
@@ -199,17 +214,27 @@ module Dea
         spawn_response = container.spawn(script)
         @warden_job_id = spawn_response.job_id
         bootstrap.snapshot.save
+
+        staging_timer = EM::Timer.new(staging_timeout) do
+          logger.error('staging.task.execute-staging.timed-out', timeout: staging_timeout, handle: container.handle)
+
+          Fiber.new do
+            begin
+              promise_stop(true).resolve
+            ensure
+              p.fail('Staging in container timed out')
+            end
+          end.resume
+        end
+
         begin
-          Timeout.timeout(staging_timeout) do
-            container.link_or_raise(@warden_job_id)
-          end
+          container.link_or_raise(@warden_job_id)
           p.deliver
         rescue Container::WardenError => staging_error
           logger.error('staging.task.execute-staging.failed', error: staging_error)
           p.fail(staging_error)
-        rescue Timeout::Error => timeout_error
-          logger.error('staging.task.execute-staging.timed-out', error: timeout_error)
-          p.fail(timeout_error)
+        ensure
+          staging_timer.cancel
         end
       end
     end
@@ -494,7 +519,7 @@ module Dea
     end
 
     def resolve_staging_setup
-      workspace.prepare
+      workspace.prepare(buildpack_manager)
       with_network = false
       container.create_container(
         bind_mounts: bind_mounts,

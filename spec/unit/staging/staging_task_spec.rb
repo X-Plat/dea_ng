@@ -100,7 +100,10 @@ describe Dea::StagingTask do
           spawn_response
         end
 
-        staging_task.promise_stage.resolve
+        with_event_machine do
+          staging_task.promise_stage.resolve
+          done
+        end
       end
 
       context 'when env variables need to be escaped' do
@@ -112,14 +115,22 @@ describe Dea::StagingTask do
 
             spawn_response
           end
-          staging_task.promise_stage.resolve
+
+          with_event_machine do
+            staging_task.promise_stage.resolve
+            done
+          end
         end
 
         it 'copes with quotes' do
           staging_task.container.should_receive(:spawn) do |cmd|
             expect(cmd).to include(%Q{export FOO="z'y\\"d";})
           end.and_return(spawn_response)
-          staging_task.promise_stage.resolve
+
+          with_event_machine do
+            staging_task.promise_stage.resolve
+            done
+          end
         end
 
         it 'copes with blank' do
@@ -128,14 +139,22 @@ describe Dea::StagingTask do
 
             spawn_response
           end
-          staging_task.promise_stage.resolve
+
+          with_event_machine do
+            staging_task.promise_stage.resolve
+            done
+          end
         end
 
         it 'copes with equal sign' do
           staging_task.container.should_receive(:spawn) do |cmd|
             expect(cmd).to include('export BAZ="foo=baz";')
           end.and_return(spawn_response)
-          staging_task.promise_stage.resolve
+
+          with_event_machine do
+            staging_task.promise_stage.resolve
+            done
+          end
         end
       end
     end
@@ -144,14 +163,22 @@ describe Dea::StagingTask do
       expect(staging_task.snapshot_attributes['warden_job_id']).to be_nil
 
       expect(staging_task.bootstrap.snapshot).to receive(:save)
-      staging_task.promise_stage.resolve
+
+      with_event_machine do
+        staging_task.promise_stage.resolve
+        done
+      end
 
       expect(staging_task.snapshot_attributes['warden_job_id']).to eq(25)
     end
 
     it 'links to the job' do
       expect(staging_task.container).to receive(:link_or_raise).with(25)
-      staging_task.promise_stage.resolve
+
+      with_event_machine do
+        staging_task.promise_stage.resolve
+        done
+      end
     end
 
     context 'when job fails' do
@@ -161,19 +188,38 @@ describe Dea::StagingTask do
       before { staging_task.container.should_receive(:link_or_raise).and_raise(staging_error) }
 
       it 'raises Container::WardenError' do
-        expect { staging_task.promise_stage.resolve }.to raise_error(Container::WardenError)
+
+        with_event_machine do
+          expect { staging_task.promise_stage.resolve }.to raise_error(Container::WardenError)
+          done
+        end
       end
     end
 
     context 'when job exceeds staging timeout' do
-      let(:max_staging_duration) { 0.5 }
+      let(:max_staging_duration) { 0.1 }
+      let(:container_staging_duration) { 0.2 }
 
       it 'fails with a TimeoutError' do
-        staging_task.container.should_receive(:link_or_raise) do
-          sleep 1
+        stop_request = ::Warden::Protocol::StopRequest.new(handle: staging_task.container.handle, kill: true)
+        allow(staging_task.container).to receive(:call).with(:stop, stop_request)
+
+        allow(staging_task.container).to receive(:link_or_raise) do
+          f = Fiber.current
+
+          EM.add_timer(container_staging_duration) do
+            f.resume
+          end
+
+          Fiber.yield
         end
 
-        expect { staging_task.promise_stage.resolve }.to raise_error(TimeoutError)
+        with_event_machine do
+          Fiber.new do
+            expect { staging_task.promise_stage.resolve }.to raise_error('Staging in container timed out')
+            done
+          end.resume
+        end
       end
     end
   end
@@ -232,6 +278,63 @@ YAML
 
     it 'returns the detected buildpack' do
       staging_task.detected_buildpack.should eq('Ruby/Rack')
+    end
+  end
+
+  describe '#buildpack_path' do
+    before do
+      contents = <<YAML
+---
+buildpack_path: some/buildpack/path
+YAML
+      staging_info = File.join(workspace_dir, 'staging_info.yml')
+      File.open(staging_info, 'w') { |f| f.write(contents) }
+    end
+
+    it 'returns the buildpack path' do
+      staging_task.buildpack_path.should eq('some/buildpack/path')
+    end
+  end
+
+  describe '#buildpack_key' do
+    let(:buildpack_path) { "#{staging_task.workspace.admin_buildpacks_dir}/admin_key" }
+
+    before do
+      FileUtils.mkdir_p(staging_task.workspace.admin_buildpacks_dir)
+      FileUtils.mkdir_p(buildpack_path)
+      contents = <<YAML
+---
+buildpack_path: #{buildpack_path}
+YAML
+      staging_info = File.join(workspace_dir, 'staging_info.yml')
+      File.open(staging_info, 'w') { |f| f.write(contents) }
+    end
+
+    context 'when an admin buildpack is detected' do
+      it 'returns the correct buildpack key' do
+        staging_task.buildpack_key.should eq('admin_key')
+      end
+    end
+
+    context 'when an admin buildpack is specified' do
+      let(:buildpack_path) { "#{staging_task.workspace.admin_buildpacks_dir}/ignored" }
+      let(:attributes) do
+        staging_attributes = valid_staging_attributes
+        staging_attributes['properties']['buildpack_key'] = 'specified_admin_key'
+        staging_attributes
+      end
+
+      it 'returns the specified admin key' do
+        staging_task.buildpack_key.should eq('specified_admin_key')
+      end
+    end
+
+    context 'when a detected system buildpack is used' do
+      let(:buildpack_path) { "#{staging_task.workspace.system_buildpacks_dir}/java" }
+
+      it 'returns a nil buildpack key' do
+        staging_task.buildpack_key.should be_nil
+      end
     end
   end
 
@@ -515,7 +618,14 @@ YAML
     end
 
     context 'when buildpack_cache_download_uri is provided' do
-      subject(:staging_task) { Dea::StagingTask.new(bootstrap, dir_server, StagingMessage.new(attributes.merge('buildpack_cache_download_uri' => 'http://www.someurl.com')), buildpacks_in_use) }
+      subject(:staging_task) do
+        Dea::StagingTask.new(
+          bootstrap,
+          dir_server,
+          StagingMessage.new(attributes.merge('buildpack_cache_download_uri' => 'http://www.someurl.com')),
+          buildpacks_in_use
+        )
+      end
 
       it 'downloads buildpack cache' do
         staging_task.should_receive(:promise_buildpack_cache_download)
@@ -754,7 +864,7 @@ YAML
 
   describe '#promise_buildpack_cache_download' do
     subject do
-      staging_task.workspace.prepare
+      staging_task.workspace.prepare(staging_task.buildpack_manager)
       promise = staging_task.promise_buildpack_cache_download
       promise.resolve
       promise

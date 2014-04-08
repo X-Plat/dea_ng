@@ -14,12 +14,14 @@ describe Dea::Responders::Staging do
   let(:snapshot) { double(:snapshot, :save => nil, :load => nil)}
   let(:bootstrap) { double(:bootstrap, :config => config, :snapshot => snapshot) }
   let(:staging_task_registry) { Dea::StagingTaskRegistry.new }
+  let(:buildpack_key) { nil }
   let(:staging_task) do
     double(:staging_task,
       staging_message: staging_message,
       task_id: "task-id",
       task_log: "task-log",
       detected_buildpack: nil,
+      buildpack_key: buildpack_key,
       droplet_sha1: "some-droplet-sha",
       memory_limit_mb: 1,
       disk_limit_mb: 2
@@ -221,6 +223,7 @@ describe Dea::Responders::Staging do
               "task_id" => "task-id",
               "task_streaming_log_url" => "streaming-log-url",
               "detected_buildpack" => nil,
+              "buildpack_key" => nil,
               "error" => nil,
               "droplet_sha1" => nil
             ))
@@ -236,6 +239,7 @@ describe Dea::Responders::Staging do
               "task_id" => "task-id",
               "task_streaming_log_url" => "streaming-log-url",
               "detected_buildpack" => nil,
+              "buildpack_key" => nil,
               "error" => "error-description",
               "droplet_sha1" => nil
             ))
@@ -246,6 +250,8 @@ describe Dea::Responders::Staging do
 
       describe "after staging completed" do
         context "when successfully" do
+          let(:buildpack_key) { "some_buildpack_key" }
+
           before do
             staging_task.stub(:after_complete_callback).and_yield(nil)
             bootstrap.stub(:start_app)
@@ -256,6 +262,7 @@ describe Dea::Responders::Staging do
               "task_id" => "task-id",
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
+              "buildpack_key" => "some_buildpack_key",
               "error" => nil,
               "droplet_sha1" => "some-droplet-sha"
             ))
@@ -310,6 +317,7 @@ describe Dea::Responders::Staging do
               "task_id" => "task-id",
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
+              "buildpack_key" => nil,
               "error" => "error-description",
               "droplet_sha1" => nil
             ))
@@ -346,6 +354,7 @@ describe Dea::Responders::Staging do
               "task_id" => "task-id",
               "task_streaming_log_url" => nil,
               "detected_buildpack" => nil,
+              "buildpack_key" => nil,
               "error" => "Error staging: task stopped",
               "droplet_sha1" => nil
             ))
@@ -400,6 +409,7 @@ describe Dea::Responders::Staging do
             "task_id" => staging_task.task_id,
             "task_streaming_log_url" => nil,
             "detected_buildpack" => nil,
+            "buildpack_key" => nil,
             "error" => "Not enough memory resources available",
             "droplet_sha1" => nil
           }
