@@ -470,6 +470,7 @@ module Dea
         return
       end
 
+      instance.update_resource_usage
       instance_registry.register(instance)
       instance
     end
