@@ -128,8 +128,20 @@ module Dea
 
     attr_reader :droplet_registry
 
+    def app_workspace
+      config['app_workspace'] || {}
+    end
+
+    def app_workuser
+      app_workspace.fetch("user", "work")
+    end
+
+    def app_workdir
+      app_workspace.fetch("work_dir", ".jpaas")
+    end
+
     def setup_droplet_registry
-      @droplet_registry = Dea::DropletRegistry.new(File.join(config["base_dir"], "droplets"), config['app_workspace']['user'])
+      @droplet_registry = Dea::DropletRegistry.new(File.join(config["base_dir"], "droplets"), app_workuser, app_workdir)
     end
 
     attr_reader :instance_registry
