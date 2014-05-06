@@ -173,7 +173,47 @@ class Container
     @client_provider.close_all
   end
 
-  def setup_network
+  def setup_network(params)
+    attributes = params.dup 
+    net_in = lambda do |container_port|
+      request = ::Warden::Protocol::NetInRequest.new
+      request.handle = attributes["warden_handle"]
+      request.container_port = container_port
+      response = call(:app, request)
+      response
+    end
+    raw_ports = attributes['instance_meta']['raw_ports']
+    if raw_ports
+          prod_ports = {}
+          attributes['instance_meta']['prod_ports'] = {}
+          raw_ports.each_pair do |name, info|
+            response = net_in.call(info['port'])
+            prod_ports[name] = {
+              'host_port'=> response.host_port,
+              'container_port' => response.container_port,
+              'port_info' => info
+            }
+            if "true" == info['http'].to_s
+               network_ports["host_port"] = response.host_port
+               network_ports["container_port"] = response.container_port
+            end
+          end
+          attributes['instance_meta']['prod_ports'] = prod_ports
+
+     end
+
+     unless network_ports["host_port"]
+       response = net_in.call(nil)
+       network_ports["host_port"]      = response.host_port
+       network_ports["container_port"] = response.container_port
+     end
+
+     response = net_in.call(nil)
+     network_ports["console_host_port"]      = response.host_port
+     network_ports["console_container_port"] = response.container_port
+     attributes
+    
+=begin    
     request = ::Warden::Protocol::NetInRequest.new(handle: handle)
     response = call(:app, request)
     network_ports['host_port'] = response.host_port
@@ -183,6 +223,7 @@ class Container
     response = call(:app, request)
     network_ports['console_host_port'] = response.host_port
     network_ports['console_container_port'] = response.container_port
+=end
   end
 
   def info

@@ -411,6 +411,17 @@ module Dea
       end
     end
 
+
+    def parse_droplet_metadata()
+      begin
+        manifest_path = container.info.container_path
+        @attributes['instance_meta'] = promise_read_instance_manifest(manifest_path).resolve || {}
+      rescue => e
+        log(:warn, "parse droplet metadata failed with exception #{e}")
+        @attributes['instance_meta'] = {}
+      end
+    end
+
     def promise_start
       Promise.new do |p|
         env = Env.new(StartMessage.new(@raw_attributes), self)
@@ -478,6 +489,7 @@ module Dea
 
         [
           promise_extract_droplet,
+          promise_setup_network,
           promise_exec_hook_script('before_start'),
           promise_start
         ].each(&:resolve)
@@ -516,7 +528,7 @@ module Dea
     def promise_container
       Promise.new do |p|
         bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_dirname}]
-        with_network = true
+        with_network = false
         container.create_container(
           bind_mounts: bind_mounts + config['bind_mounts'],
           limit_cpu: config['instance']['cpu_limit_shares'],
@@ -529,6 +541,13 @@ module Dea
 
         promise_setup_environment.resolve
         p.deliver
+      end
+    end
+    def promise_setup_network
+      Promise.new do |p|
+        parse_droplet_metadata
+      	@attributes = container.setup_network(@attributes)
+      	p.deliver 
       end
     end
 
@@ -911,8 +930,15 @@ module Dea
         'application_version' => application_version,
         'application_name' => application_name,
       }
-
       @logger ||= self.class.logger.tag(tags)
+    end
+
+    def log(level, message, data = {})
+      logger.send(level, message, base_log_data.merge(data))
+    end
+
+    def base_log_data
+      { :attributes => @attributes }
     end
   end
 end
