@@ -417,7 +417,6 @@ module Dea
         script << "chown #{app_workuser}:#{app_workuser} home/#{app_workuser}/#{app_workdir}"
         script << "ln -s home/#{app_workuser}/#{app_workdir} /app"
         script = script.join(" && ")
-        p script
         container.run_script(:app, script, true)
 
         p.deliver
@@ -426,11 +425,8 @@ module Dea
 
     def promise_extract_droplet
       Promise.new do |p|
-        #script = "cd /home/vcap/ && tar zxf #{droplet.droplet_path}"
-        #script = "cd /home/#{app_workuser}/#{app_workdir} && tar zxf #{droplet.droplet_path}"
         script = [
           "cd /home/#{app_workuser}/#{app_workdir}",
-          #"tar zxf #{droplet.droplet_path}",
           "tar zxf #{droplet.droplet_in_container}",
           "mv /home/#{app_workuser}/#{app_workdir}/app/* /home/#{app_workuser}"
           ].join(" && ")
@@ -559,8 +555,8 @@ module Dea
 
     def promise_container
       Promise.new do |p|
-        #bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_dirname}]
-        bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_path_in_container}]
+        bind_mounts = [{'src_path' => droplet.droplet_dirname, 
+                        'dst_path' => droplet.droplet_path_in_container}]
         with_network = false
         container.create_container(
           bind_mounts: bind_mounts + config['bind_mounts'],
