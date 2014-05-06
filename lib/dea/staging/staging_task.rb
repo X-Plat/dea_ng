@@ -2,7 +2,7 @@ require 'tempfile'
 require 'tmpdir'
 require 'yaml'
 require 'shellwords'
-
+require 'fileutils'
 require 'container/container'
 
 require 'dea/utils/download'
@@ -180,11 +180,24 @@ module Dea
       end
     end
 
+    def app_workspace
+      @config['app_workspace']
+    end
+
+    def app_workdir
+      app_workspace.fetch("work_dir", ".node")
+    end
+
+    def app_workuser
+      app_workspace.fetch("user", "vcap")
+    end
+
     def promise_app_dir
       Promise.new do |p|
         # Some buildpacks seem to make assumption that /app is a non-empty directory
         # See: https://github.com/heroku/heroku-buildpack-python/blob/master/bin/compile#L46
-        script = 'mkdir -p /app && touch /app/support_heroku_buildpacks && chown -R vcap:vcap /app'
+        #script = 'mkdir -p /app && touch /app/support_heroku_buildpacks && chown -R vcap:vcap /app'
+        script = "mkdir -p /app && touch /app/support_heroku_buildpacks && chown -R #{app_workuser}:#{app_workuser} /app"
 
         logger.info 'staging.task.making-app-dir', script: script
 
@@ -197,6 +210,7 @@ module Dea
     def promise_stage
       Promise.new do |p|
         script = staging_command
+        p staging_command
         logger.debug 'staging.task.execute-staging', script: script
 
         spawn_response = container.spawn(script)
@@ -282,6 +296,7 @@ module Dea
             p.fail(error)
           else
             File.rename(download_destination.path, workspace.downloaded_app_package_path)
+            #FileUtils.move(download_destination.path, workspace.downloaded_app_package_path)
             File.chmod(0744, workspace.downloaded_app_package_path)
 
             logger.debug 'staging.app-download.completed',

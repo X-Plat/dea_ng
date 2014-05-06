@@ -21,6 +21,10 @@ module Dea
         "cpu_limit_shares" => 256,
         "disk_inode_limit" => DEFAULT_INSTANCE_DISK_INODE_LIMIT,
       },
+      "app_workspace" => {
+        "user" => "jpaas",
+        "work_dir" => ".node",
+      },
       "staging" => {
         "cpu_limit_shares" => 512,
         "disk_inode_limit" => DEFAULT_STAGING_DISK_INODE_LIMIT,
@@ -67,6 +71,11 @@ module Dea
             optional("user") => String,
             optional("port") => Integer,
             optional("password") => String,
+          },
+
+          optional("app_workspace") => {
+            optional("user") => String,
+            optional("work_dir") => String,
           },
 
           optional("intervals") => {

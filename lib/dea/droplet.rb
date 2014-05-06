@@ -13,13 +13,22 @@ module Dea
     attr_reader :base_dir
     attr_reader :sha1
 
-    def initialize(base_dir, sha1)
+    def initialize(base_dir, sha1, app_workuser='vcap')
       @base_dir = base_dir
       @sha1 = sha1
+      @app_workuser = app_workuser
       @pending_downloads = []
 
       # Make sure the directory exists
       FileUtils.mkdir_p(droplet_dirname)
+    end
+
+    def droplet_path_in_container
+      "/home/#{@app_workuser}/.node/droplets"
+    end
+
+    def droplet_in_container
+      File.join(droplet_path_in_container, droplet_basename)
     end
 
     def droplet_dirname

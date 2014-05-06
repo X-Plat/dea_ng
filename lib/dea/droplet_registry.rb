@@ -8,12 +8,12 @@ module Dea
   class DropletRegistry < Hash
     attr_reader :base_dir
 
-    def initialize(base_dir)
+    def initialize(base_dir, app_workuser='vcap')
       super() do |hash, sha1|
         raise ArgumentError, "sha cannot be nil" if sha1.nil?
         logger.debug "New droplet: #{sha1}", :droplet_sha1 => sha1
 
-        hash[sha1] = Droplet.new(base_dir, sha1)
+        hash[sha1] = Droplet.new(base_dir, sha1, app_workuser)
       end
 
       # Seed registry with available droplets
