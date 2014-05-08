@@ -410,14 +410,11 @@ module Dea
 
     def promise_setup_environment
       Promise.new do |p|
-        #script = 'cd / && mkdir -p home/vcap/app && chown vcap:vcap home/vcap/app && ln -s home/vcap/app /app'
         script = []
-        #script << "cd / && mkdir -p home/#{app_workuser}/app"
         script << "cd / && mkdir -p home/#{app_workuser}/#{app_workdir}"
         script << "chown #{app_workuser}:#{app_workuser} home/#{app_workuser}/#{app_workdir}"
         script << "ln -s home/#{app_workuser}/#{app_workdir} /app"
         script = script.join(" && ")
-        p script
         container.run_script(:app, script, true)
 
         p.deliver
