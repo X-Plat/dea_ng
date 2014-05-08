@@ -144,6 +144,10 @@ module Dea
       attributes['application_id'] ||= attributes.delete('droplet').to_s if attributes['droplet']
       attributes['droplet_sha1'] ||= attributes.delete('sha1')
       attributes['droplet_uri'] ||= attributes.delete('executableUri')
+      attributes["tags"]                ||= attributes.delete("tags") { |_| {} }
+      attributes["application_space"]         ||= attributes["tags"]["space_name"]
+      attributes["application_org"]         ||= attributes["tags"]["org_name"]
+      attributes["application_name_without_version"]         ||= attributes["application_name"].split("_")[0]
 
       # Translate environment to dictionary (it is passed as Array with VAR=VAL)
       env = attributes.delete('env') || []
@@ -299,6 +303,18 @@ module Dea
       limits['fds'].to_i
     end
 
+    def app_workspace
+      bootstrap.config['app_workspace']
+    end
+
+    def app_workuser
+      app_workspace['user']
+    end
+
+    def app_workdir
+      app_workspace['work_dir']
+    end
+
     def instance_path_available?
       state == State::RUNNING || state == State::CRASHED
     end
@@ -394,7 +410,11 @@ module Dea
 
     def promise_setup_environment
       Promise.new do |p|
-        script = 'cd / && mkdir -p home/vcap/app && chown vcap:vcap home/vcap/app && ln -s home/vcap/app /app'
+        script = []
+        script << "cd / && mkdir -p home/#{app_workuser}/#{app_workdir}"
+        script << "chown #{app_workuser}:#{app_workuser} home/#{app_workuser}/#{app_workdir}"
+        script << "ln -s home/#{app_workuser}/#{app_workdir} /app"
+        script = script.join(" && ")
         container.run_script(:app, script, true)
 
         p.deliver
@@ -403,7 +423,11 @@ module Dea
 
     def promise_extract_droplet
       Promise.new do |p|
-        script = "cd /home/vcap/ && tar zxf #{droplet.droplet_path}"
+        script = [
+          "cd /home/#{app_workuser}/#{app_workdir}",
+          "tar zxf #{droplet.droplet_in_container}",
+          "mv /home/#{app_workuser}/#{app_workdir}/app/* /home/#{app_workuser}"
+          ].join(" && ")
 
         container.run_script(:app, script)
 
@@ -438,7 +462,9 @@ module Dea
             Dea::StartupScriptGenerator.new(
               command,
               env.exported_user_environment_variables,
-              env.exported_system_environment_variables
+              env.exported_system_environment_variables,
+              app_workuser,
+              app_workdir
             ).generate
         else
           start_script = env.exported_environment_variables + "./startup;\nexit"
@@ -525,12 +551,44 @@ module Dea
       end
     end
 
+    def tag_info(key)
+      attributes.fetch("tags", {}).fetch("#{key}_name", "default")
+    end
+    
+    def data_path(mode)
+      case mode
+        when "org"
+          tag_info("org")
+        when "space"
+          File.join(tag_info("org"), tag_info("space"))
+        else
+          tag_info("org")
+      end 
+    end 
+
+    def data_paths_to_bind
+      return [] if ! config["org_data"]
+      prefix = config["org_data"]["src_prefix"]
+      bind_mounts = []
+      data_dir_to_mount = data_path(config["org_data"].fetch("share_mode", "org"))
+      config["org_data"]["bind_mounts"].each do |bm|
+        bind_mount = {}
+        src_base_path = File.join("/home/#{app_workuser}/appdata")
+        bind_mount["src_path"] = File.join(prefix, data_dir_to_mount)
+        FileUtils.mkdir_p(bind_mount["src_path"]) unless File.exists?(bind_mount["src_path"]) 
+        bind_mount["dst_path"] = File.join(src_base_path)
+        bind_mount["mode"] = bm["mode"] || "ro"
+        bind_mounts << bind_mount.dup
+      end 
+      bind_mounts
+    end
+
     def promise_container
       Promise.new do |p|
-        bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_dirname}]
+        bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_path_in_container}]
         with_network = false
         container.create_container(
-          bind_mounts: bind_mounts + config['bind_mounts'],
+          bind_mounts: bind_mounts + config['bind_mounts'] + data_paths_to_bind,
           limit_cpu: config['instance']['cpu_limit_shares'],
           byte: disk_limit_in_bytes,
           inode: config.instance_disk_inode_limit,
@@ -538,6 +596,7 @@ module Dea
           setup_network: with_network)
 
         attributes['warden_handle'] = container.handle
+        attributes['warden_host_ip'] = container.host_ip
 
         promise_setup_environment.resolve
         p.deliver
@@ -550,7 +609,14 @@ module Dea
       	p.deliver 
       end
     end
-
+    def promise_setup_sshd
+      log(:debug, "start sshd service")
+      Promise.new do |p|
+        script = "service sshd start"
+        promise_warden_run(:app, script, true).resolve
+        p.deliver
+      end
+    end
     def instance_host_port
       container.network_ports['host_port']
     end
@@ -606,7 +672,7 @@ module Dea
       Promise.new do |p|
         new_instance_path = File.join(config.crashes_path, instance_id)
         new_instance_path = File.expand_path(new_instance_path)
-        copy_out_request('/home/vcap/logs/', new_instance_path + '/logs')
+        copy_out_request("/home/#{app_workuser}/#{app_workdir}/logs/", new_instance_path + '/logs')
 
         attributes['instance_path'] = new_instance_path
 
@@ -723,7 +789,7 @@ module Dea
           next
         end
 
-        manifest_path = container_relative_path(container_path, 'droplet.yaml')
+        manifest_path = container_relative_path(container_path, app_workdir, 'droplet.yaml')
         if File.exist?(manifest_path)
           manifest = YAML.load_file(manifest_path)
           p.deliver(manifest)
@@ -828,7 +894,7 @@ module Dea
           staging_file_name = 'staging_info.yml'
           copied_file_name = "#{destination_dir}/#{staging_file_name}"
 
-          copy_out_request("/home/vcap/#{staging_file_name}", destination_dir)
+          copy_out_request("/home/#{app_workuser}/#{app_workdir}/#{staging_file_name}", destination_dir)
 
           YAML.load_file(copied_file_name) if File.exists?(copied_file_name)
         end
@@ -903,11 +969,11 @@ module Dea
     def container_relative_path(root, *parts)
       # This can be removed once warden's wsh branch is merged to master
       if File.directory?(File.join(root, 'rootfs'))
-        return File.join(root, 'rootfs', 'home', 'vcap', *parts)
+        return File.join(root, 'rootfs', 'home', app_workuser, *parts)
       end
 
       # New path
-      File.join(root, 'tmp', 'rootfs', 'home', 'vcap', *parts)
+      File.join(root, 'tmp', 'rootfs', 'home', app_workuser, *parts)
     end
 
     def health_check_timeout
