@@ -21,6 +21,11 @@ module Dea
         "cpu_limit_shares" => 256,
         "disk_inode_limit" => DEFAULT_INSTANCE_DISK_INODE_LIMIT,
       },
+      "org_data" => {
+        "src_prefix" => "appdata",
+        "share_mode" => "space",
+        "bind_mounts" => [],
+      },
       "app_workspace" => {
         "user" => "work",
         "work_dir" => ".jpaas",

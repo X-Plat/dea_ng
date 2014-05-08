@@ -417,6 +417,7 @@ module Dea
         script << "chown #{app_workuser}:#{app_workuser} home/#{app_workuser}/#{app_workdir}"
         script << "ln -s home/#{app_workuser}/#{app_workdir} /app"
         script = script.join(" && ")
+        p script
         container.run_script(:app, script, true)
 
         p.deliver
@@ -425,8 +426,11 @@ module Dea
 
     def promise_extract_droplet
       Promise.new do |p|
+        #script = "cd /home/vcap/ && tar zxf #{droplet.droplet_path}"
+        #script = "cd /home/#{app_workuser}/#{app_workdir} && tar zxf #{droplet.droplet_path}"
         script = [
           "cd /home/#{app_workuser}/#{app_workdir}",
+          #"tar zxf #{droplet.droplet_path}",
           "tar zxf #{droplet.droplet_in_container}",
           "mv /home/#{app_workuser}/#{app_workdir}/app/* /home/#{app_workuser}"
           ].join(" && ")
@@ -553,13 +557,44 @@ module Dea
       end
     end
 
+    def tag_info(key)
+      attributes.fetch("tags", {}).fetch("#{key}_name", "default")
+    end
+    
+    def data_path(mode)
+      case mode
+        when "org"
+          tag_info("org")
+        when "space"
+          File.join(tag_info("org"), tag_info("space"))
+        else
+          tag_info("org")
+      end 
+    end 
+
+    def data_paths_to_bind
+      return [] if ! config["org_data"]
+      prefix = config["org_data"]["src_prefix"]
+      bind_mounts = []
+      data_dir_to_mount = data_path(config["org_data"].fetch("share_mode", "org"))
+      config["org_data"]["bind_mounts"].each do |bm|
+        bind_mount = {}
+        src_base_path = File.join("/home/#{app_workuser}", prefix)
+        bind_mount["src_path"] = File.join("/home/work", prefix, bm["name"], data_dir_to_mount)
+        FileUtils.mkdir_p(bind_mount["src_path"]) unless File.exists?(bind_mount["src_path"]) 
+        bind_mount["dst_path"] = File.join(src_base_path, bm["name"])
+        bind_mount["mode"] = bm["mode"] || "ro"
+        bind_mounts << bind_mount.dup
+      end 
+      bind_mounts
+    end
+
     def promise_container
       Promise.new do |p|
-        bind_mounts = [{'src_path' => droplet.droplet_dirname, 
-                        'dst_path' => droplet.droplet_path_in_container}]
+        bind_mounts = [{'src_path' => droplet.droplet_dirname, 'dst_path' => droplet.droplet_path_in_container}]
         with_network = false
         container.create_container(
-          bind_mounts: bind_mounts + config['bind_mounts'],
+          bind_mounts: bind_mounts + config['bind_mounts'] + data_paths_to_bind,
           limit_cpu: config['instance']['cpu_limit_shares'],
           byte: disk_limit_in_bytes,
           inode: config.instance_disk_inode_limit,
