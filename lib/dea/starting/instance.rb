@@ -426,11 +426,8 @@ module Dea
 
     def promise_extract_droplet
       Promise.new do |p|
-        #script = "cd /home/vcap/ && tar zxf #{droplet.droplet_path}"
-        #script = "cd /home/#{app_workuser}/#{app_workdir} && tar zxf #{droplet.droplet_path}"
         script = [
           "cd /home/#{app_workuser}/#{app_workdir}",
-          #"tar zxf #{droplet.droplet_path}",
           "tar zxf #{droplet.droplet_in_container}",
           "mv /home/#{app_workuser}/#{app_workdir}/app/* /home/#{app_workuser}"
           ].join(" && ")
@@ -678,7 +675,7 @@ module Dea
       Promise.new do |p|
         new_instance_path = File.join(config.crashes_path, instance_id)
         new_instance_path = File.expand_path(new_instance_path)
-        copy_out_request("/home/#{app_workuser}/logs/", new_instance_path + '/logs')
+        copy_out_request("/home/#{app_workuser}/#{app_workdir}/logs/", new_instance_path + '/logs')
 
         attributes['instance_path'] = new_instance_path
 
