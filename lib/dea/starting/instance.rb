@@ -573,10 +573,10 @@ module Dea
       data_dir_to_mount = data_path(config["org_data"].fetch("share_mode", "org"))
       config["org_data"]["bind_mounts"].each do |bm|
         bind_mount = {}
-        src_base_path = File.join("/home/#{app_workuser}", prefix)
-        bind_mount["src_path"] = File.join("/home/work", prefix, bm["name"], data_dir_to_mount)
+        src_base_path = File.join("/home/#{app_workuser}/appdata")
+        bind_mount["src_path"] = File.join(prefix, data_dir_to_mount)
         FileUtils.mkdir_p(bind_mount["src_path"]) unless File.exists?(bind_mount["src_path"]) 
-        bind_mount["dst_path"] = File.join(src_base_path, bm["name"])
+        bind_mount["dst_path"] = File.join(src_base_path)
         bind_mount["mode"] = bm["mode"] || "ro"
         bind_mounts << bind_mount.dup
       end 
