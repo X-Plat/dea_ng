@@ -215,7 +215,7 @@ describe Dea::Env do
         "container_host" => "192.168.0.1",
         "name"        => "name",
         "instance_id" => "instance_id",
-	"instance_index" => "3"
+	"instance_index" => "3",
         "version"     => "version",
 	"cluster"     => "testme",
       }
