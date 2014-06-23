@@ -20,7 +20,6 @@ module Dea
 
     STAT_COLLECTION_INTERVAL_SECS = 10
     DEFAULT_APPWORKSPACE_USER = "default"
-    DEFAULT_APPWORKSPACE_DIR = ".default"
     DEFAULT_WORKUSER_LENGTH = 30
     DEFAULT_WORKUSER_PASSWORD = 'default'
 
@@ -257,12 +256,10 @@ module Dea
 
     attr_reader :bootstrap
     attr_reader :attributes
-    attr_reader :app_workusr
-    attr_reader :app_workdir
     attr_accessor :exit_status
     attr_accessor :exit_description
 
-    def initialize(bootstrap, attributes, app_workusr = DEFAULT_APPWORKSPACE_USER, app_workdir = DEFAULT_APPWORKSPACE_DIR)
+    def initialize(bootstrap, attributes, app_user = nil)
       super(bootstrap.config)
       @bootstrap = bootstrap
 
@@ -280,8 +277,7 @@ module Dea
       # Assume non-production app when not specified
       @attributes["application_prod"] ||= false
 
-      @app_workusr = app_workusr
-      @app_workdir = app_workdir
+      @app_user = app_user
 
       @exit_status           = -1
       @exit_description      = ""
@@ -289,13 +285,17 @@ module Dea
 
     def setup
       setup_stat_collector
-      setup_link
+      #setup_link
       setup_crash_handler
     end
 
     # TODO: Fill in once start is hooked up
     def flapping?
       false
+    end
+
+    def app_workspace_user
+      @app_user ? @app_user : DEFAULT_APPWORKSPACE_USER
     end
 
     def memory_limit_in_bytes
@@ -346,51 +346,6 @@ module Dea
 
           File.expand_path(container_relative_path(attributes["warden_container_path"]))
         end
-    end
-
-    def unzip_droplet_file_dir
-        File.join(droplet.unzip_droplet_dir,"#{attributes['application_org']}_#{attributes['application_space']}_#{attributes['application_name_without_version']}")
-    end
-    def unzip_droplet_file_dir_in_container
-        File.join("/home/#{app_workuser}/#{app_workdir}/unzip_droplet","#{attributes['application_org']}_#{attributes['application_space']}_#{attributes['application_name_without_version']}")
-    end
-    def paths_to_bind
-      if use_p2p?
-        [ {:src => unzip_droplet_file_dir, :dst => unzip_droplet_file_dir_in_container} ]
-      else
-        [ { :src => droplet.droplet_dirname, :dst => droplet.droplet_dirname_in_container} ]
-      end
-    end
-
-    def tag_info(key)                                           
-      attributes["tags"].fetch("#{key}_name", "default")        
-    end
-
-    def data_path(mode)                                         
-      case mode
-        when "org"
-          tag_info("org")
-        when "space"
-          File.join(tag_info("org"), tag_info("space"))
-        else
-          tag_info("org")
-      end
-    end
-
-    def data_paths_to_bind
-      return [] if ! config["org_data"]
-      prefix = mfs_path
-      bind_mounts = []
-      data_dir_to_mount = data_path(config["org_data"].fetch("share_mode", "org"))
-      config["org_data"].fetch("bind_mounts", []).each do |bm|
-        bind_mount = {}
-        src_base_path = File.join("/home", app_workusr, prefix)
-        bind_mount["src_path"] = File.join("/home/work", prefix, bm["name"], data_dir_to_mount)
-        bind_mount["dst_path"] = File.join(src_base_path, bm["name"])
-        bind_mount["mode"] = bm["mode"] || "ro"
-        bind_mounts << bind_mount.dup
-      end
-      bind_mounts
     end
 
     def validate
@@ -457,118 +412,16 @@ module Dea
       end
     end
 
-    def promise_setup_network
-      Promise.new do |p|
-        net_in = lambda do |container_port|
-          request = ::Warden::Protocol::NetInRequest.new
-          request.handle = @attributes["warden_handle"]
-          request.container_port = container_port
-          promise_warden_call(:app, request).resolve
-        end
-
-        parse_droplet_metadata
-
-        raw_ports = attributes['instance_meta']['raw_ports']
-        if raw_ports
-          prod_ports = {}
-          attributes['instance_meta']['prod_ports'] = {}
-          raw_ports.each_pair do |name, info|
-            response = net_in.call(info['port'])
-            prod_ports[name] = {
-              'host_port'=> response.host_port,
-              'container_port' => response.container_port,
-              'port_info' => info
-            }
-            if "true" == info['http'].to_s
-              attributes["instance_host_port"] = response.host_port
-              attributes["instance_container_port"] = response.container_port
-            end
-          end
-          attributes['instance_meta']['prod_ports'] = prod_ports
-
-        end
-
-        unless attributes["instance_host_port"]
-          response = net_in.call(nil)
-          attributes["instance_host_port"]      = response.host_port
-          attributes["instance_container_port"] = response.container_port
-        end
-
-        response = net_in.call(nil)
-        attributes["instance_console_host_port"]      = response.host_port
-        attributes["instance_console_container_port"] = response.container_port
-
-        response = net_in.call(nil)
-        attributes["instance_mgr_host_port"]      = response.host_port
-        attributes["instance_mgr_container_port"] = response.container_port
-
-        response = net_in.call(nil)
-        attributes["noah_monitor_host_port"]      = response.host_port
-        attributes["noah_monitor_container_port"] = response.container_port
-
-        if attributes["debug"]
-          response = net_in.call(nil)
-          attributes["instance_debug_host_port"]      = response.host_port
-          attributes["instance_debug_container_port"] = response.container_port
-        end
-
-        p.deliver
-      end
-    end
-
-    def promise_setup_environment
-      Promise.new do |p|
-        script = [
-          "cd / && mkdir -p home/#{app_workusr}/#{app_workdir}",
-          "cd / && mkdir -p home/#{app_workusr}/jpaas_run/{logs,status}",
-          "chown -R #{app_workusr}:#{app_workusr} home/#{app_workusr}/jpaas_run/",
-          "chown #{app_workusr}:#{app_workusr} home/#{app_workusr}",
-          "chown #{app_workusr}:#{app_workusr} home/#{app_workusr}/#{app_workdir}",
-          "ln -s home/#{app_workusr}/#{app_workdir} /app"
-          ].join(' && ')
-        promise_warden_run(:app, script, true).resolve
-
-        p.deliver
-      end
-    end
-
-    def promise_setup_sshd
-      log(:debug, "start sshd service")
-      Promise.new do |p|
-        script = "service sshd start"
-        promise_warden_run(:app, script, true).resolve
-        p.deliver
-      end
-    end
-
-    def promise_setup_crond
-      log(:debug, "start crond service")
-      Promise.new do |p|
-        script = "service crond start"
-        promise_warden_run(:app, script, true).resolve
-        p.deliver
-      end
-    end
-
     def promise_extract_droplet
       Promise.new do |p|
-        if use_p2p?
-            script = [
-              "cd /home/#{app_workusr}/",
-              "cp -r #{unzip_droplet_file_dir_in_container}/app/* /home/#{app_workusr}",
-              "mv /home/#{app_workusr}/#{app_workdir}/startup /home/#{app_workusr}/",
-              "find . -type f -maxdepth 1 | xargs chmod og-x"
-            ].join(' && ')
-            promise_warden_run(:app, script).resolve
-        else
-            script = [
-              "cd /home/#{app_workusr}/#{app_workdir}/",
-              "tar zxf #{droplet.droplet_path_in_container}",
-              "mv /home/#{app_workusr}/#{app_workdir}/app/* /home/#{app_workusr}",
-              "mv /home/#{app_workusr}/#{app_workdir}/startup /home/#{app_workusr}"
-            ].join(' && ')
-            promise_warden_run(:app, script).resolve
-        end
+        script = []
+        script << "cd /home/work"
+        script << "tar zxf #{droplet.droplet_basename}"
+        script << "rsync -auP app/* /home/work"
+        #script << "find . -type f -maxdepth 1 | xargs chmod og-x"
+        script = script.join(' && ')
+        p "script #{script}"
+        promise_matrix_run(attributes['matrix_container'], script)
         p.deliver
       end
     end
@@ -583,15 +436,12 @@ module Dea
         "instance_index" => attributes['instance_index'].to_s,
         "instance_meta"  => attributes['instance_meta'],
         "instance_tags"  => attributes['tags']
-
       }
     end
 
     def parse_droplet_metadata()
       begin
-        info = container.info
-        manifest_path = info.container_path
-        @attributes['instance_meta'] = promise_read_instance_manifest(manifest_path).resolve || {}
+        @attributes['instance_meta'] = promise_read_instance_manifest(attributes['matrix_container']).resolve || {}
         if ( config['enable_sshd'] == true )
           @attributes['instance_meta']['raw_ports'] = {} if !@attributes['instance_meta']['raw_ports']
           log(:warn, "ignore user defined sshd port") if @attributes['instance_meta']['raw_ports']['sshd']
@@ -605,82 +455,83 @@ module Dea
 
     def promise_start
       Promise.new do |p|
+        p "begin start"
+        p attributes['instance_meta']
+        attributes['instance_meta']['prod_ports'].each_pair do |key, value|
+          env_key = attributes['tags']['bns_node'] + '_' + key
+          env_val = value['port']
+          #script << "export %s=%s" % [env_key, env_val]
+        end        
+
         script = []
-
-        script << "umask 022"
-
-        env = Env.new(self)
-        env.env.each do |(key, value)|
-          script << "export %s=%s" % [key, value]
-        end
-
-        startup = "./startup"
-
-        # Pass port to `startup` if we have one
+        script << "mkdir -p /home/work/jpaas_run/logs"
+        script << "cd /home/work"
+        startup = "./startup "
+        
         if self.instance_container_port
-          startup << " -p %d" % self.instance_container_port
+          startup += " -p %d" % self.instance_container_port
         end
-
+        startup += "&"
         script << startup
-        script << "exit"
-
-        request = ::Warden::Protocol::SpawnRequest.new
-        request.handle = attributes["warden_handle"]
-        request.script = script.join("\n")
-
-        request.rlimits = ::Warden::Protocol::ResourceLimits.new
-        request.rlimits.nofile = self.file_descriptor_limit
-        request.rlimits.nproc = 307200 
-
-        request.work_user  = work_user
-
-        response = promise_warden_call(:app, request).resolve
-
-        attributes["warden_job_id"] = response.job_id
+        script = script.join(" && ")
+        p "script #{script}"
+        response = promise_matrix_run(attributes['matrix_container'], script)
 
         p.deliver
       end
     end
 
-    def promise_exec_hook_script(key)
-      Promise.new do |p|
-        if bootstrap.config['hooks'] && bootstrap.config['hooks'][key]
-          script_path = bootstrap.config['hooks'][key]
-          if File.exist?(script_path)
-            script = []
-            script << "umask 022"
-            env = Env.new(self)
-            env.env.each do |k, v|
-              script << "export %s=%s" % [k, v]
-            end
-            script << File.read(script_path)
-            script << "exit"
-            promise_warden_run(:app, script.join("\n")).resolve
-          else
-            log(:warn, "droplet.hook-script.missing", :hook => key, :script_path => script_path)
+    def start_with_matrix(&callback) 
+      p = Promise.new do |p|
+         attributes['matrix_container'] = attributes['instance_index'].to_s + '.' + attributes['tags']['bns_node']
+         promise_droplet.resolve
+         parse_droplet_metadata
+         msg = matrix_create_container_msg(attributes)
+         apply_container(msg) do |resp|
+           resp = resp.data
+           return if resp['err']
+           setup_network(resp['ports'])
+           start(&callback)
+         end
+         p.deliver
+      end
+      resolve(p, "start instance with matrix") do |error, _|
+        
+      end       
+    end
+
+    def setup_network(ports)
+      return unless ports.size > 0
+      raw_ports = attributes['instance_meta']['raw_ports']
+      if raw_ports
+        prod_ports = {}
+        attributes['instance_meta']['prod_ports'] = {}
+        raw_ports.each_pair do |name, info|
+          port = ports[name]
+          prod_ports[name] = {
+            'host_port'=> port,
+            'container_port' => port,
+            'port_info' => info
+          }
+          if "true" == info['http'].to_s
+            attributes["instance_host_port"] = port
+            attributes["instance_container_port"] = port
           end
         end
-        p.deliver
+        attributes['instance_meta']['prod_ports'] = prod_ports
       end
+      p attributes['instance_meta']['prod_ports']
     end
 
     def start(&callback)
       p = Promise.new do
         log(:info, "droplet.starting")
-
         promise_state(State::BORN, State::STARTING).resolve
 
-        # Concurrently download droplet and setup container
-        [
-          promise_droplet,
-          promise_container
-        ].each(&:run).each(&:resolve)
+        promise_cpin_droplet.resolve
 
         [
           promise_extract_droplet,
-          promise_setup_network,
-          promise_change_work_user,
-          promise_exec_hook_script('before_start'),
           promise_start
         ].each(&:resolve)
 
@@ -690,12 +541,11 @@ module Dea
 
         # Fire off link so that the health check can be cancelled when the
         # instance crashes before the health check completes.
-        link
+        #link
 
         if promise_health_check.resolve
           promise_state(State::STARTING, State::RUNNING).resolve
           log(:info, "droplet.healthy")
-          promise_exec_hook_script('after_start').resolve
         else
           log(:warn, "droplet.unhealthy")
           p.fail("App instance failed health check")
@@ -715,102 +565,134 @@ module Dea
       end
     end
 
-    def work_user
-      user_given = attributes.fetch('instance_meta', {}).
-                   fetch('work_user', app_workusr)
-      if user_given.size <= DEFAULT_WORKUSER_LENGTH &&
-         (/^[a-z\d][\w,-]*[a-z\d]$/i.match(user_given))
-         user = user_given
-      end
-      user
+    def matrix_create_container_msg(msg)
+        {
+          "service_name"   => msg['tags']['bns_node'],
+          "offset"         => msg['instance_index'],
+          "ip"             => bootstrap.local_ip,
+          "payload"        => {
+            "packageSource" => "",
+            "packageVersion" => "",
+            "packageType" => "EMPTY",
+            "deployDir" => "/home/work",
+            "process" => {
+               "main" => "java"
+             },
+            "tag" => {
+               "tag1" => "value1"
+            },
+            "deployTimeoutSec" => 300,
+            "healthCheckTimeoutSec" => 30,
+            "enableHealthCheck" => false,
+            "resourceRequirement" => {
+               "cpu" => {
+                  "normalizedCore" => {
+                     "quota" => 1,
+                     "limit" => 2
+                   }
+               },
+               "memory" => {
+                  "sizeMB" => {
+                     "quota" => msg['limits']['mem'],
+                     "limit" => msg['limits']['mem']
+                   }
+               },
+               "network" => {
+                  "inBandwidthMBPS" => {
+                     "quota" => 10,
+                     "limit" => 10
+                   },
+                   "outBandwidthMBPS" => {
+                      "quota" => 1,
+                      "limit" => 1
+                   }
+                },
+               "port" => {
+                  "staticPort" => get_static_ports,
+                  "dynamicPortName" => get_dynamic_ports
+               },
+               "process" => {
+                  "thread" => {
+                     "quota" => 1000,
+                     "limit" => 1000
+                   }
+               },
+               "workspace" => {
+                  "sizeMB" => {
+                     "quota" => msg['limits']['disk'],
+                     "limit" => msg['limits']['disk']
+                  },
+                  "inode" => {
+                      "quota" => 10000,
+                      "limit" => 10000
+                   },
+                  "type" => "home",
+                  "bindPoint" => "data2",
+                  "exclusive" => false,
+                  "useSoftLinkDir" => false
+               },
+               "requiredDisk" => [],
+               "optionalDisk" => []
+            },
+            "baseEnv" => "centos6u3"
+          }
+        }
     end
 
-    def promise_change_work_user
-      Promise.new do |p|
-        if work_user
-          promise_update_work_user.resolve unless work_user == app_workusr
-        else
-          p.fail("Work user should be composed by letters/numbers/-/_( e.g.: a-b_1, test1) and shorter than #{DEFAULT_WORKUSER_LENGTH}")
+    def get_static_ports
+       static_ports = {}
+       attributes['instance_meta']['raw_ports'].each_pair do |name, info|
+         static_ports[name] = info['port']
+       end
+       #static_ports
+       {}
+    end
+
+    def get_dynamic_ports
+       dynamic_ports = []
+       attributes['instance_meta']['raw_ports'].each_pair do |name, info|
+         dynamic_ports << name
+       end
+       dynamic_ports
+    end
+
+    def apply_container(msg, &blk)
+        #matrix_msg = matrix_create_container_msg(msg)
+        sid = bootstrap.nats.request("matrix.container.create", msg) do |resp, error|
+          blk.call(resp) unless error != nil
         end
-        p.deliver 
-      end
-    end
-    
-    def mfs_path
-      org_data = config["org_data"] || {}
-      org_data.fetch("src_prefix", "appdata")
+        #bootstrap.nats.timeout(sid, 3) do 
+        #  log(:warn, "failed create container")
+        #end
     end
 
-    def promise_update_work_user
+
+    def promise_cpin_droplet
       Promise.new do |p|
-        script = []
-
-        script << "useradd #{work_user} -M"
-        script << "echo '#{work_user}:#{DEFAULT_WORKUSER_PASSWORD}' | chpasswd"
-        find_opts = []
-        find_opts << "find /home/#{app_workusr}"
-        find_opts << "-maxdepth 1"
-        find_opts << [ mfs_path, app_workdir, "."].
-                     map {|e| "-not -name " + e }.
-                     join(" ")
-        find_opts << "-exec chown -R #{work_user}:#{work_user} '{}' ';'"
-        script << find_opts.join(" ")
-        script << "ln -s /home/#{app_workusr} /home/#{work_user}"
-        script = script.join(" && ")
-        promise_warden_run(:app, script, true).resolve
-
+          p "when cpy in #{droplet.droplet_path} to /home/work"
+          start = Time.now
+          promise_copy_in(attributes["matrix_container"],
+                          droplet.droplet_path,
+                          "/home/work")
+          log(:info, "droplet.download.finished", :took => Time.now - start)
         p.deliver
       end
-    end
-
-    def promise_container
-      Promise.new do |p|
-        promise_create_container.resolve
-        #promise_setup_network.resolve
-        promise_limit_disk.resolve
-        promise_limit_memory.resolve
-        promise_setup_environment.resolve
-        promise_setup_sshd.resolve if ( config['enable_sshd'] == true )
-        promise_setup_crond.resolve
-        p.deliver
-      end
-    end
-
-    def use_p2p?
-        use_p2p||false
     end
 
     def promise_droplet
       Promise.new do |p|
-        if use_p2p?
-            log(:info, "unzip droplet.download.starting by gko3")
-            start = Time.now
-            promise_unzipdroplet_download.resolve
-            log(:info, "unzip droplet.download.finished by gko3", :took => Time.now - start)
+        if !droplet.droplet_exist?
+          log(:info, "droplet.download.starting")
+          start = Time.now
+          promise_droplet_download.resolve
+          FileUtils.makedirs(droplet.droplet_unzip_dirname)
+          p "tar zxf #{droplet.droplet_path} -C #{droplet.droplet_unzip_dirname}"
+          `tar zxf #{droplet.droplet_path} -C #{droplet.droplet_unzip_dirname}`
+          log(:info, "droplet.download.finished", :took => Time.now - start)
         else
-            if !droplet.droplet_exist?
-                log(:info, "droplet.download.starting")
-                start = Time.now
-                promise_droplet_download.resolve
-                log(:info, "droplet.download.finished", :took => Time.now - start)
-            else
-                log(:info, "droplet.download.skipped")
-            end
+          log(:info, "droplet.download.skipped")
         end
         p.deliver
-      end
-    end
-
-
-    def promise_unzipdroplet_download
-        Promise.new do |p|
-           droplet.download_unzip_droplet(infohash) do |error|
-            if error
-                p.fail(error)
-            else
-                p.deliver
-            end
-        end
       end
     end
 
@@ -818,11 +700,7 @@ module Dea
       p = Promise.new do
         log(:info, "droplet.stopping")
 
-        promise_exec_hook_script('before_stop').resolve
-
         promise_state(State::RUNNING, State::STOPPING).resolve
-
-        promise_exec_hook_script('after_stop').resolve
 
         promise_stop.resolve
 
@@ -833,18 +711,6 @@ module Dea
 
       resolve(p, "stop instance") do |error, _|
         callback.call(error) unless callback.nil?
-      end
-    end
-
-    def promise_copy_out
-      Promise.new do |p|
-        new_instance_path = File.join(config.crashes_path, instance_id)
-        new_instance_path = File.expand_path(new_instance_path)
-        copy_out_request("/home/work/", new_instance_path)
-
-        attributes["instance_path"] = new_instance_path
-
-        p.deliver
       end
     end
 
@@ -867,11 +733,8 @@ module Dea
 
     def promise_crash_handler
       Promise.new do |p|
-        if attributes["warden_handle"]
-          # promise_copy_out.resolve
+        if attributes["matrix_container"]
           promise_destroy.resolve
-
-          close_warden_connections
         end
 
         p.deliver
@@ -910,60 +773,16 @@ module Dea
       end
     end
 
-    def setup_link
-      # Resuming to running state
-      on(Transition.new(:resuming, :running)) do
-        link
-      end
-    end
-
-    def promise_link
-      Promise.new do |p|
-        request = ::Warden::Protocol::LinkRequest.new
-        request.handle = attributes["warden_handle"]
-        request.job_id = attributes["warden_job_id"]
-        response = promise_warden_call_with_retry(:link, request).resolve
-
-        log(:info, "droplet.warden.link.completed", :exit_status => response.exit_status)
-
-        p.deliver(response)
-      end
-    end
-
-    def link(&callback)
-      Promise.resolve(promise_link) do |error, link_response|
-        if error
-          self.exit_status = -1
-          self.exit_description = "unknown"
-        else
-          self.exit_status = link_response.exit_status
-          self.exit_description = determine_exit_description(link_response)
-        end
-
-        case self.state
-        when State::STARTING
-          self.state = State::CRASHED
-        when State::RUNNING
-          uptime = Time.now - attributes["state_running_timestamp"]
-          log(:info, "droplet.instance.uptime", :uptime => uptime)
-
-          self.state = State::CRASHED
-        else
-          # Linking likely completed because of stop
-        end
-
-        callback.call(error) unless callback.nil?
-      end
-    end
-
     def promise_read_instance_manifest(container_path)
       Promise.new do |p|
+        p 'read instance manifest'
+        p container_path
         if container_path.nil?
           p.deliver({})
           next
         end
-
-        manifest_path = container_relative_path(container_path, app_workdir, "droplet.yaml")
+        manifest_path = metafile_relative_path(container_path)
+        p "manifest_path #{manifest_path}"
         if !File.exist?(manifest_path)
           p.deliver({})
         else
@@ -1016,33 +835,22 @@ module Dea
 
     def promise_health_check
       Promise.new do |p|
-        begin
-          logger.debug "droplet.health-check.get-container-info"
-          info = container.info
-          logger.debug "droplet.health-check.container-info-ok"
-        rescue => e
-          logger.error "droplet.health-check.container-info-failed",
-            :error => e, :backtrace => e.backtrace
-
-          p.deliver(false)
+        manifest = promise_read_instance_manifest(attributes['matrix_container']).resolve
+        p manifest
+        if manifest && manifest["start_timeout"]
+           start_timeout = manifest["start_timeout"]
         else
-          attributes["warden_container_path"] = info.container_path
-          attributes["warden_host_ip"] = info.host_ip
-
-          manifest = promise_read_instance_manifest(info.container_path).resolve
-          if manifest && manifest["start_timeout"]
-            start_timeout = manifest["start_timeout"]
-          else
-            start_timeout = 300
-          end
-          if manifest && manifest["state_file"]
-            manifest_path = container_relative_path(info.container_path, manifest["state_file"])
-            p.deliver(promise_state_file_ready(manifest_path,start_timeout).resolve)
-          elsif !application_uris.empty?
-            p.deliver(promise_port_open(instance_host_port,start_timeout).resolve)
-          else
-            p.deliver(true)
-          end
+          start_timeout = 300
+        end
+        if manifest && manifest["state_file"]
+          p "check stat file"
+          manifest_path = container_relative_path(attributes['matrix_container'], "/home/work/",manifest["state_file"])
+          p.deliver(promise_state_file_ready(manifest_path, start_timeout).resolve)
+        elsif !application_uris.empty?
+          attributes["instance_host_port"] = attributes['instance_meta']['raw_ports'].values_at(1)['port']
+          p.deliver(promise_port_open(attributes["instance_host_port"], start_timeout).resolve)
+        else
+          p.deliver(true)
         end
       end
     end
@@ -1080,14 +888,13 @@ module Dea
       "app instance exited"
     end
 
-    def container_relative_path(root, *parts)
-      # This can be removed once warden's wsh branch is merged to master
-      if File.directory?(File.join(root, "rootfs"))
-        return File.join(root, "rootfs", "home", app_workusr, *parts)
-      end
+    def container_relative_path(handle, *parts)
+      File.join("/home/matrix/containers", handle, *parts)
+    end
 
-      # New path
-      File.join(root, "tmp", "rootfs", "home", app_workusr, *parts)
+    def metafile_relative_path(container_path)
+      p "unzip #{droplet.droplet_unzip_dirname}"
+      File.join(droplet.droplet_unzip_dirname, 'droplet.yaml')
     end
 
     def logger

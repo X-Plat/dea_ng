@@ -13,18 +13,14 @@ module Dea
     end
 
     def info
-      request = ::Warden::Protocol::InfoRequest.new
-      request.handle = @handle
-      client.call(request)
+      `matrix_query #{@handle}`
     end
 
     private
 
     def client
-      unless @client && @client.connected?
-        @client = EventMachine::Warden::FiberAwareClient.new(@socket_path).tap(&:connect)
-      end
-      @client
+      @client ||=
+        EventMachine::Warden::FiberAwareClient.new(@socket_path).tap(&:connect)
     end
   end
 end

@@ -94,8 +94,9 @@ module Dea::Protocol::V1
   end
 
   class AdvertiseMessage
-    def self.generate(message={})
+    def self.generate(bootstrap, message={})
       { "id" => message[:id],
+        "ip" => bootstrap.local_ip,
         "prod" => message[:prod],
         "stacks" => message[:stacks],
         "available_memory" => message[:available_memory],

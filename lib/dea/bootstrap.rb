@@ -80,16 +80,8 @@ module Dea
       setup_router_client
     end
 
-    def app_workspace
-      config["app_workspace"] || {}
-    end
-
-    def app_workuser
-      app_workspace.fetch("user", "work")
-    end
-
-    def app_workdir
-      app_workspace.fetch("work_dir", ".jpaas")
+    def app_user
+      config["app_workspace"]["user"]
     end
 
     def setup_varz
@@ -135,7 +127,7 @@ module Dea
     attr_reader :droplet_registry
 
     def setup_droplet_registry
-      @droplet_registry = Dea::DropletRegistry.new(File.join(config["base_dir"], "droplets"), app_workuser, app_workdir)
+      @droplet_registry = Dea::DropletRegistry.new(File.join(config["base_dir"], "droplets"))
     end
 
     attr_reader :instance_registry
@@ -288,7 +280,7 @@ module Dea
       nats.start
 
       @responders = [
-        Dea::Responders::DeaLocator.new(nats, uuid, resource_manager, config),
+        Dea::Responders::DeaLocator.new(nats, self, uuid, resource_manager, config),
         Dea::Responders::StagingLocator.new(nats, uuid, resource_manager, config),
         Dea::Responders::Staging.new(nats, uuid, self, staging_task_registry, directory_server_v2, config),
       ].each(&:start)
@@ -401,14 +393,14 @@ module Dea
     def create_instance(attributes)
       attributes = Instance.translate_attributes(attributes)
 
-      unless resource_manager.could_reserve?(attributes["limits"]["mem"], attributes["limits"]["disk"])
-        message = "Unable to start instance: #{attributes["instance_index"]}"
-        message << " for app: #{attributes["application_id"]}, not enough resources available."
-        logger.error(message)
-        return nil
-      end
+      #unless resource_manager.could_reserve?(attributes["limits"]["mem"], attributes["limits"]["disk"])
+      #  message = "Unable to start instance: #{attributes["instance_index"]}"
+      #  message << " for app: #{attributes["application_id"]}, not enough resources available."
+      #  logger.error(message)
+      #  return nil
+      #end
 
-      instance = Instance.new(self, attributes, app_workuser, app_workdir)
+      instance = Instance.new(self, attributes, app_user)
       instance.setup
 
       instance.on(Instance::Transition.new(:starting, :crashed)) do
@@ -451,6 +443,10 @@ module Dea
 
       instance.on(Instance::Transition.new(:starting, :running)) do
         save_snapshot
+      end
+
+      instance.on(Instance::Transition.new(:starting, :crashed)) do
+        save_snapshot unless config['clean_droplet']
       end
 
       instance.on(Instance::Transition.new(:running, :stopping)) do
@@ -522,7 +518,7 @@ module Dea
         return
       end
 
-      instance.start
+      instance.start_with_matrix
     end
 
     def handle_dea_stop(message)

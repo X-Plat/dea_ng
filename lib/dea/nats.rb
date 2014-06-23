@@ -76,11 +76,12 @@ module Dea
       do_not_track_subscription = opts.delete(:do_not_track_subscription)
 
       sid = client.subscribe(subject, opts) do |raw_data, respond_to|
-        begin
+         p raw_data
+        #begin
           yield handle_incoming_message(subject, raw_data, respond_to)
-        rescue => e
-          logger.error "Error \"#{e}\" raised while processing #{subject.inspect}: #{raw_data}"
-        end
+        #rescue => e
+        #  logger.error "Error \"#{e}\" raised while processing #{subject.inspect}: #{raw_data}"
+        #end
       end
 
       @sids[subject] = sid unless do_not_track_subscription

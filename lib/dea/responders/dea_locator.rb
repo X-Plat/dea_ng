@@ -9,11 +9,12 @@ module Dea::Responders
     attr_reader :resource_manager
     attr_reader :config
 
-    def initialize(nats, dea_id, resource_manager, config)
+    def initialize(nats, bootstrap,dea_id, resource_manager, config)
       @nats = nats
       @dea_id = dea_id
       @resource_manager = resource_manager
       @config = config
+      @bootstrap = bootstrap
     end
 
     def start
@@ -29,7 +30,7 @@ module Dea::Responders
     def advertise
       nats.publish(
         "dea.advertise",
-        Dea::Protocol::V1::AdvertiseMessage.generate({
+        Dea::Protocol::V1::AdvertiseMessage.generate(@bootstrap, {
           :id => dea_id,
           :prod => config.only_production_apps?,
           :stacks => config["stacks"] || [],

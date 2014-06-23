@@ -15,14 +15,10 @@ module Dea
     attr_reader :app_name
     attr_reader :app_space
     attr_reader :app_org
-    attr_reader :app_workuser
-    attr_reader :app_workdir
 
-    def initialize(base_dir, sha1, app_workuser, app_workdir)
+    def initialize(base_dir, sha1)
       @base_dir = base_dir
       @sha1 = sha1
-      @app_workuser = app_workuser
-      @app_workdir = app_workdir
 
       # Make sure the directory exists
       FileUtils.mkdir_p(droplet_dirname)
@@ -32,16 +28,12 @@ module Dea
       File.expand_path(File.join(base_dir, sha1))
     end
 
+    def droplet_unzip_dirname
+      File.expand_path(File.join(base_dir, sha1, 'unzip'))
+    end
+    
     def droplet_basename
       "droplet.tgz"
-    end
-
-    def droplet_dirname_in_container
-      "/home/#{app_workuser}/#{app_workdir}/droplets"
-    end
-
-    def droplet_path_in_container
-      File.join(droplet_dirname_in_container, droplet_basename)
     end
 
     def droplet_path
