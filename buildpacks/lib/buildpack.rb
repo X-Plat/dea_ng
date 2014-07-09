@@ -191,12 +191,18 @@ if [ -d .jpaas/app/.profile.d ]; then
   done
   unset i
 fi
+
+mkdir -p jpaas_run/logs/
+env > jpaas_run/logs/env.log
+
 if [ -e logagent/bin/logagent_control ]; then
    (cd logagent/bin/ && bash logagent_control start)
 fi
 
-mkdir -p jpaas_run/logs/
-env > jpaas_run/logs/env.log
+if [ -e minos_tailer/minos_control ]; then
+   (cd minos_tailer && bash minos_control)
+fi
+
 BASH
         script_content += console_start_script if rails_buildpack?(build_pack)
         script_content
