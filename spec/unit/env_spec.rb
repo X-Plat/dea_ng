@@ -284,6 +284,7 @@ describe Dea::Env do
       instance.stub(:bootstrap).and_return do
         mock("bootstrap", :config => {})
       end
+      instance.stub(:instance_rmi_random_ports).and_return({"rmi1" => {"host" => "60000"}, "rm2" => {"host" => "60001"}})
     end
 
     def find(key)
@@ -337,6 +338,10 @@ describe Dea::Env do
 
     it "includes JPAAS_CLUSTER" do
       find("JPAAS_CLUSTER").should =~ /#{application_for_json["cluster"]}/
+    end
+
+    it "includes JPAAS_RMI_RMI1_RANDOM_PORT" do
+      find("JPAAS_RMI_RMI1_RANDOM_PORT").should =~ /60000/
     end
 
     it "includes the debug mode when the debug mode is set" do

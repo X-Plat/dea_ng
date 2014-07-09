@@ -824,6 +824,7 @@ describe Dea::Instance do
           instance.unstub(:promise_exec_hook_script)
           instance.stub(:instance_meta).and_return({})
           instance.container.stub(:info => info_response)
+	  instance.stub(:instance_rmi_random_ports).and_return({})
         end
 
         it "should execute script file" do
