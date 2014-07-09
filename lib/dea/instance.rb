@@ -23,6 +23,7 @@ module Dea
     DEFAULT_APPWORKSPACE_DIR = ".default"
     DEFAULT_WORKUSER_LENGTH = 30
     DEFAULT_WORKUSER_PASSWORD = 'default'
+    DEFAULT_RESOURCE_USAGE_REFRESH_SECS = 5
 
     BIND_MOUNT_MODE_MAP = {
       "ro" =>  ::Warden::Protocol::CreateRequest::BindMount::Mode::RO,
@@ -1071,6 +1072,14 @@ module Dea
       @stat_collector ||= StatCollector.new(container)
     end
 
+    def update_resource_usage
+      EM.add_periodic_timer(DEFAULT_RESOURCE_USAGE_REFRESH_SECS) do
+        attributes["resource_usage"]||={}
+        attributes["resource_usage"]["used_memory_in_bytes"]=used_memory_in_bytes
+        attributes["resource_usage"]["used_disk_in_bytes"]=used_disk_in_bytes
+        attributes["resource_usage"]["computed_pcpu"]=computed_pcpu
+      end
+    end
     private
 
     def determine_exit_description(link_response)
