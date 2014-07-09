@@ -285,6 +285,7 @@ describe Dea::Env do
         mock("bootstrap", :config => {})
       end
       instance.stub(:instance_rmi_random_ports).and_return({"rmi1" => {"host" => "60000"}, "rm2" => {"host" => "60001"}})
+      instance.stub(:instance_mgr_host_port).and_return("4570")
     end
 
     def find(key)
