@@ -109,8 +109,10 @@ module Dea
          env << ["JPAAS_#{k.upcase}", v]
       end
 
-      instance.instance_rmi_random_ports.each_pair do |key, value|
-	 env << ["JPAAS_RMI_#{key.upcase}_RANDOM_PORT", value["host"]]
+      unless instance.instance_rmi_random_ports.nil?
+      	instance.instance_rmi_random_ports.each_pair do |key, value|
+	  env << ["JPAAS_RMI_#{key.upcase}_RANDOM_PORT", value["host"]]
+        end
       end
 
       env << ["JPAAS_CONTAINER_HTTP_PORT",  instance.instance_container_port]
