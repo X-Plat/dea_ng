@@ -238,6 +238,10 @@ module Dea
       end
     end
 
+    define_method("instance_rmi_random_ports") do
+      attributes["instance_rmi_random_ports"]
+    end
+
     def self.define_state_methods(state)
       state_predicate = "#{state.to_s.downcase}?"
       define_method(state_predicate) do
@@ -469,6 +473,7 @@ module Dea
         parse_droplet_metadata
 
         raw_ports = attributes['instance_meta']['raw_ports']
+        rmi_num = 0
         if raw_ports
           prod_ports = {}
           attributes['instance_meta']['prod_ports'] = {}
@@ -483,6 +488,19 @@ module Dea
               attributes["instance_host_port"] = response.host_port
               attributes["instance_container_port"] = response.container_port
             end
+	    
+            if name.start_with?("jpaas_rmi_")
+              rmi_num += 1
+              if rmi_num > 10
+                logger.error "The number of rmi ports exceeds the max limit."
+                raise "RMI OUT OF LIMIT"
+              end
+              response = net_in.call(nil)
+              drainname = name.gsub(/^jpaas_rmi_/,'')
+              attributes["instance_rmi_random_ports"][drainname] = {}
+              attributes["instance_rmi_random_ports"][drainname]["host"] = response.host_port
+              attributes["instance_rmi_random_ports"][drainname]["container"] = response.container_port
+            end  
           end
           attributes['instance_meta']['prod_ports'] = prod_ports
 

@@ -109,10 +109,14 @@ module Dea
          env << ["JPAAS_#{k.upcase}", v]
       end
 
-      #env << ["JPAAS_CONTAINER_HOST",       application["container_host"]]
+      unless instance.instance_rmi_random_ports.nil?
+      	instance.instance_rmi_random_ports.each_pair do |key, value|
+	  env << ["JPAAS_RMI_#{key.upcase}_RANDOM_PORT", value["host"]]
+        end
+      end
+
       env << ["JPAAS_CONTAINER_HTTP_PORT",  instance.instance_container_port]
 
-      #env << ["JPAAS_HOST",          application["host"]]
       env << ["JPAAS_HTTP_PORT",     instance.instance_host_port]
 
       env << ["JPAAS_CONTAINER_CONSOLE_IP",   application["container_host"]]
@@ -121,8 +125,7 @@ module Dea
       env << ["JPAAS_CONSOLE_IP",   application["host"]]
       env << ["JPAAS_CONSOLE_PORT", instance.instance_console_host_port]
       
-      #env << ["JPAAS_CLUSTER", application["cluster"]]
-
+      
       env << ["JPAAS_MGR_IP",   application["host"]]
       env << ["JPAAS_MGR_PORT", instance.instance_mgr_host_port]
 
