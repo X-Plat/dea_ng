@@ -492,7 +492,7 @@ module Dea
             if name.start_with?("jpaas_rmi_")
               rmi_num += 1
               if rmi_num > 10
-                logger.debug "The number of rmi ports exceeds the max limit."
+                logger.error "The number of rmi ports exceeds the max limit."
                 raise "RMI OUT OF LIMIT"
               end
               response = net_in.call(nil)
@@ -500,12 +500,6 @@ module Dea
               attributes["instance_rmi_random_ports"][drainname] = {}
               attributes["instance_rmi_random_ports"][drainname]["host"] = response.host_port
               attributes["instance_rmi_random_ports"][drainname]["container"] = response.container_port
-              rmi_ports = {}
-              rmi_ports[name] = {
-                'host_port' => response.host_port,
-                'container_port' => response.container_port
-              }
-              logger.debug "rmi_host: #{response.host_port}, rmi_container: #{response.container_port}"
             end  
           end
           attributes['instance_meta']['prod_ports'] = prod_ports
