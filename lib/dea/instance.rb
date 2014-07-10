@@ -477,6 +477,7 @@ module Dea
         if raw_ports
           prod_ports = {}
           attributes['instance_meta']['prod_ports'] = {}
+	  attributes['instance_rmi_random_ports'] = {}
           raw_ports.each_pair do |name, info|
             response = net_in.call(info['port'])
             prod_ports[name] = {
