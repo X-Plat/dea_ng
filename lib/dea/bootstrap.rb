@@ -497,9 +497,10 @@ module Dea
 
     def register_routes
       instance_registry.each do |instance|
-        next if !instance.running? || instance.application_uris.empty?
+	next if !instance.running?
+	nats.publish("broker.register", instance.metadata)
+        next if instance.application_uris.empty?
         router_client.register_instance(instance)
-        nats.publish("broker.register",instance.metadata)
       end
 
       register_directory_server_v2
