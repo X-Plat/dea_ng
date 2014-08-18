@@ -650,7 +650,7 @@ module Dea
 
         request.rlimits = ::Warden::Protocol::ResourceLimits.new
         request.rlimits.nofile = self.file_descriptor_limit
-        request.rlimits.nproc = 307200 
+        request.rlimits.nproc = 10240
 
         request.work_user  = work_user
 
