@@ -48,6 +48,8 @@ module Dea
 
           "stacks" => [String],
           
+          "os_base_dir" => String,
+
 	  "domain" => /\.baidu\.com$/,
 
           optional("crash_lifetime_secs") => Integer,
