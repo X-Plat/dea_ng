@@ -55,6 +55,8 @@ logging:
 stacks:
   - lucid64
 
+os_base_dir: /home/work/warden
+
 # clean droplet if droplet stop or crash
 clean_droplet: false
 
