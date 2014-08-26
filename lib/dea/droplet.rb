@@ -82,6 +82,27 @@ module Dea
         File.join(base_dir,"../#{infohash}.torrent")
     end
 
+    def get_os
+      logger.debug "Start to get os type from Release directly"
+      rel_info = `tar zxfO #{droplet_path} ./app/Release`
+      logger.info("Release #{rel_info}")
+      if $?.success?
+        os_type = YAML.load(rel_info)["os"]
+        return os_type if os_type
+      end
+      return nil
+    end
+ 
+    def get_os_p2p(sub_dir)
+      logger.debug "Start to get os type from Release directly at p2p mod"
+      rel_info = `cat #{unzip_droplet_dir}/#{sub_dir}/app/Release`
+      if $?.success?
+        os_type = YAML.load(rel_info)["os"]
+        return os_type if os_type
+      end
+      return nil
+    end
+
     def download_unzip_droplet(infohash,&blk)
       @download_waiting ||= []
       @download_waiting << blk

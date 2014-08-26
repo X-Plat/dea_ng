@@ -650,14 +650,13 @@ module Dea
 
         request.rlimits = ::Warden::Protocol::ResourceLimits.new
         request.rlimits.nofile = self.file_descriptor_limit
-        request.rlimits.nproc = 10240
+        request.rlimits.nproc = 10240 
 
         request.work_user  = work_user
 
         response = promise_warden_call(:app, request).resolve
 
         attributes["warden_job_id"] = response.job_id
-
         p.deliver
       end
     end
@@ -691,11 +690,9 @@ module Dea
         promise_state(State::BORN, State::STARTING).resolve
 
         # Concurrently download droplet and setup container
-        [
-          promise_droplet,
-          promise_container
-        ].each(&:run).each(&:resolve)
-
+        promise_droplet.resolve
+        os_path = promise_get_os.resolve
+        promise_container(os_path).resolve 
         [
           promise_extract_droplet,
           promise_setup_network,
@@ -783,9 +780,9 @@ module Dea
       end
     end
 
-    def promise_container
+    def promise_container(os_type)
       Promise.new do |p|
-        promise_create_container.resolve
+        promise_create_container(os_type).resolve
         #promise_setup_network.resolve
         promise_limit_disk.resolve
         promise_limit_memory.resolve
@@ -821,6 +818,20 @@ module Dea
       end
     end
 
+    def promise_get_os
+      Promise.new do |p|
+        os = os_type = nil
+        if use_p2p?
+          log(:info,"get os info in p2p mode")
+          os = droplet.get_os_p2p("#{attributes['application_org']}_#{attributes['application_space']}_#{attributes['application_name_without_version']}")
+        else
+          log(:info,"get os info in normal mode")
+          os = droplet.get_os
+        end
+        os_path = "#{config['os_base_dir']}/rootfs_#{os}" if os
+        p.deliver(os_path)
+      end
+    end
 
     def promise_unzipdroplet_download
         Promise.new do |p|

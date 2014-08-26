@@ -284,6 +284,21 @@ module Dea
       end
     end
 
+    def promise_get_os
+      Promise.new do |p|
+        logger.debug "Start to get os type from Release directly"
+        logger.info("app packaget #{workspace.downloaded_droplet_path}")
+        rel_info = `unzip -qc #{workspace.downloaded_droplet_path} Release`
+        if $?.success?
+          os_type = YAML.load(rel_info)["os"]
+          p.deliver(os_type) if os_type
+        end
+        p.deliver(nil)
+      end 
+    end
+
+    
+
     def promise_log_upload_started
       Promise.new do |p|
         promise_warden_run(:app, <<-BASH).resolve
@@ -343,7 +358,6 @@ module Dea
       Promise.new do |p|
         logger.info("Copying out to #{workspace.staged_droplet_path}")
         copy_out_request(workspace.warden_staged_droplet, workspace.staged_droplet_dir)
-
         p.deliver
       end
     end
@@ -420,7 +434,6 @@ module Dea
       Promise.new do |p|
         logger.info("Copying out to #{workspace.staged_droplet_path}")
         copy_out_request(workspace.warden_staged_buildpack_cache, workspace.staged_droplet_dir)
-
         p.deliver
       end
     end
@@ -433,8 +446,11 @@ module Dea
 
     def resolve_staging_setup
       prepare_workspace
-
-      promises = [promise_app_download, promise_create_container]
+      promise_app_download.resolve
+      os = promise_get_os.resolve
+      os_path = "#{config["os_base_dir"]}/rootfs_#{os}" if os 
+      logger.info("Rootfs at #{os_path}")
+      promises = [promise_create_container(os_path)]
       promises << promise_buildpack_cache_download if attributes["buildpack_cache_download_uri"]
 
       Promise.run_in_parallel(*promises)

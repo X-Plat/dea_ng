@@ -137,7 +137,7 @@ module Dea
       []
     end
 
-    def promise_create_container
+    def promise_create_container(os_path = nil)
       Promise.new do |p|
         bind_mounts = paths_to_bind.map do |path|
           bind_mount = ::Warden::Protocol::CreateRequest::BindMount.new
@@ -146,7 +146,6 @@ module Dea
           bind_mount.mode = ::Warden::Protocol::CreateRequest::BindMount::Mode::RO
           bind_mount
         end
-
         # extra mounts (currently just used for the buildpack cache)
         ( config["bind_mounts"] + data_paths_to_bind ).each do |bm|
           bind_mount = ::Warden::Protocol::CreateRequest::BindMount.new
@@ -168,14 +167,18 @@ module Dea
 
         create_request = ::Warden::Protocol::CreateRequest.new
         create_request.bind_mounts = bind_mounts
-
+        create_request.rootfs = os_path if valid_os_path?(os_path)
         response = promise_warden_call(:app, create_request).resolve
-
         @attributes["warden_handle"] = response.handle
         logger.user_data[:warden_handle] = response.handle
 
         p.deliver
       end
+    end
+
+    def valid_os_path?(os_path)
+      `chroot #{os_path} pwd`
+      $?.success?
     end
 
     def promise_limit_disk
