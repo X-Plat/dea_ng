@@ -28,6 +28,16 @@ module Dea
       bootstrap.nats.publish("router.unregister", req)
     end
 
+    def unregister_instance_ensure(instance, opts = {}, &callback)
+      req = generate_instance_request(instance, opts)
+      sid = bootstrap.nats.request("router.unregister", req) do |resp, error|
+        callback.call()
+      end
+      bootstrap.nats.client.timeout(sid, 30, :expected => 1) do
+        callback.call("Router Timeout")
+      end
+    end
+
     def greet(&blk)
       bootstrap.nats.request("router.greet", &blk)
     end

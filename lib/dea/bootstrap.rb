@@ -430,7 +430,9 @@ module Dea
       end
 
       instance.on(Instance::Transition.new(:running, :stopping)) do
-        router_client.unregister_instance(instance)
+        # Now we unregister instance before stop instance, and ensure it by the reply message of router
+        #router_client.unregister_instance(instance)
+        
         # This is a little wonky but ensures that we don't send an exited
         # message twice. During evacuation, an exit message is sent for each
         # running app, the evacuation interval is allowed to pass, and the app
@@ -530,8 +532,14 @@ module Dea
       instances_filtered_by_message(message) do |instance|
         next if !instance.running?
 
-        instance.stop do |error|
-          logger.warn("Failed stopping #{instance}: #{error}") if error
+        router_client.unregister_instance_ensure(instance) do |error|
+          if(error)
+            logger.warn("No response from router, failed stopping #{instance}: #{error}")
+          else
+            instance.stop do |error|
+              logger.warn("Failed stopping #{instance}: #{error}") if error
+            end
+          end
         end
       end
     end
