@@ -203,6 +203,10 @@ if [ -e minos_tailer/minos_control ]; then
    (cd minos_tailer && bash minos_control)
 fi
 
+if [ -e jpaas_log_transfer/bin/jpaas_log_transfer.sh ]; then
+   (cd jpaas_log_transfer/bin && bash jpaas_log_transfer.sh start)
+fi
+
 BASH
         script_content += console_start_script if rails_buildpack?(build_pack)
         script_content
