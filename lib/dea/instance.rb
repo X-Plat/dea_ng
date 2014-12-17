@@ -594,17 +594,23 @@ module Dea
     end
 
     def metadata(opts={})
-      {
-        "app_uri" => opts[:uris],
+      begin
+          deploy_path = File.join(attributes["warden_container_path"], 'tmp', 'rootfs')
+      rescue                   
+          deploy_path = nil      
+          log(:warn, "failed to get deploy_path for metadata")
+      end
+      { 
+        "app_uri" => opts[:uris],       
         "app_id" => attributes['application_db_id'].to_s,
-        "app_name" => attributes['application_name'],
+        "app_name" => attributes['application_name'], 
         "instance_ip" => bootstrap.local_ip,
         "instance_id" => attributes['instance_id'],
         "instance_index" => attributes['instance_index'].to_s,
-        "instance_meta"  => attributes['instance_meta'],
-        "instance_tags"  => attributes['tags']
-
-      }
+        "instance_meta"  => attributes['instance_meta'], 
+        "instance_tags"  => attributes['tags'],
+        "instance_path"  => deploy_path 
+      }	
     end
 
     def parse_droplet_metadata()
