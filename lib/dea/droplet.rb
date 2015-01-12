@@ -87,8 +87,13 @@ module Dea
       rel_info = `tar zxfO #{droplet_path} ./app/Release`
       logger.info("Release #{rel_info}")
       if $?.success?
-        os_type = YAML.load(rel_info)["os"]
-        return os_type if os_type
+        begin
+          os_type = YAML.load(rel_info)["os"]
+          return os_type if os_type
+        rescue Exception
+          logger.debug("Error when load yml")
+          return nil
+        end
       end
       return nil
     end
@@ -97,8 +102,13 @@ module Dea
       logger.debug "Start to get os type from Release directly at p2p mod"
       rel_info = `cat #{unzip_droplet_dir}/#{sub_dir}/app/Release`
       if $?.success?
-        os_type = YAML.load(rel_info)["os"]
-        return os_type if os_type
+        begin
+          os_type = YAML.load(rel_info)["os"]
+          return os_type if os_type
+        rescue Exception
+          logger.debug("Error when load yml")
+          return nil
+        end
       end
       return nil
     end
