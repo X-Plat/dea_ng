@@ -290,8 +290,13 @@ module Dea
         logger.info("app packaget #{workspace.downloaded_droplet_path}")
         rel_info = `unzip -qc #{workspace.downloaded_droplet_path} Release`
         if $?.success?
-          os_type = YAML.load(rel_info)["os"]
-          p.deliver(os_type) if os_type
+          begin
+            os_type = YAML.load(rel_info)["os"]
+          rescue Exception
+            logger.debug("Error when load yml")
+          ensure
+            p.deliver(os_type) if os_type
+          end
         end
         p.deliver(nil)
       end 

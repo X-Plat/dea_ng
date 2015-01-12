@@ -48,7 +48,7 @@ module Dea::Responders
 
     def handle_stop(message)
       staging_task_registry.each do |task|
-        if message.data["app_id"] == task.attributes["app_id"]
+        if(message.data["app_id"] == task.attributes["app_id"] && message.data["task_id"] != task.task_id)
           task.stop
         end
       end
